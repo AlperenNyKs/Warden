@@ -35,22 +35,26 @@ namespace Warden
 
         private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
 
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetWindowLong(IntPtr hWnd, int nIndex);
+        // 64-bit süreçte doğru imza GetWindowLongPtr/SetWindowLongPtr'dir
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
-        [DllImport("user32.dll")]
-        private static extern IntPtr SetWindowLong(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+        private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
         private readonly ThrottleStopService _tsService;
         private readonly AppConfig _config;
         private readonly Action _saveConfigAction;
         private readonly Action _openWardenAction;
+        private readonly Action? _enabledChangedAction;
         private bool _isLocked = false;
+        private bool _isClosing = false;
         private readonly Button[] _profileButtons;
         private readonly Style _normalStyle;
         private readonly Style _activeStyle;
 
-        public DesktopWidgetWindow(ThrottleStopService tsService, AppConfig config, Action saveConfigAction, Action openWardenAction)
+        public DesktopWidgetWindow(ThrottleStopService tsService, AppConfig config, Action saveConfigAction,
+                                   Action openWardenAction, Action? enabledChangedAction = null)
         {
             InitializeComponent();
 
@@ -58,6 +62,7 @@ namespace Warden
             _config = config;
             _saveConfigAction = saveConfigAction;
             _openWardenAction = openWardenAction;
+            _enabledChangedAction = enabledChangedAction;
 
             _profileButtons = new[] { btnProfile1, btnProfile2, btnProfile3, btnProfile4 };
             _normalStyle = (Style)FindResource("ProfileBtnStyle");
@@ -71,16 +76,20 @@ namespace Warden
             double left = _config.DesktopWidgetLeft;
             double top = _config.DesktopWidgetTop;
 
-            double maxLeft = SystemParameters.VirtualScreenWidth - 200;
-            double maxTop = SystemParameters.VirtualScreenHeight - 60;
+            // Sanal ekran negatif koordinatlardan başlayabilir (ana ekranın solunda/üstünde monitör varsa)
+            double minLeft = SystemParameters.VirtualScreenLeft;
+            double minTop = SystemParameters.VirtualScreenTop;
+            double maxLeft = minLeft + SystemParameters.VirtualScreenWidth - 200;
+            double maxTop = minTop + SystemParameters.VirtualScreenHeight - 60;
 
-            if (left < 0 || left > maxLeft) left = 100;
-            if (top < 0 || top > maxTop) top = 100;
+            if (double.IsNaN(left) || left < minLeft || left > maxLeft) left = 100;
+            if (double.IsNaN(top) || top < minTop || top > maxTop) top = 100;
 
             this.Left = left;
             this.Top = top;
 
             // Load profile names & visibility
+            ApplyLanguage();
             UpdateProfileButtonLabels();
             ApplyVisibleProfiles();
 
@@ -89,15 +98,50 @@ namespace Warden
 
             // Hook ThrottleStop changes
             _tsService.ActiveProfileChanged += OnActiveProfileChanged;
+            _tsService.ProfileNamesChanged += OnProfileNamesChanged;
 
             // Auto restore if shell hides window
             this.IsVisibleChanged += (s, e) =>
             {
-                if (!this.IsVisible && _config.DesktopWidgetEnabled)
+                // Kapanırken Show() çağrılırsa WPF InvalidOperationException fırlatır ve çıkış yarıda kalır
+                if (!this.IsVisible && _config.DesktopWidgetEnabled && !_isClosing)
                 {
-                    this.Show();
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        if (!_isClosing && _config.DesktopWidgetEnabled && !IsVisible) Show();
+                    });
                 }
             };
+        }
+
+        /// <summary>Widget'ın verilen config nesnesini kullanıp kullanmadığı (config yeniden yüklendiğinde kontrol için).</summary>
+        public bool UsesConfig(AppConfig config) => ReferenceEquals(_config, config);
+
+        /// <summary>Uygulama kapanırken widget'ı gerçekten kapatır (otomatik geri açma devre dışı).</summary>
+        public void CloseForReal()
+        {
+            _isClosing = true;
+            Close();
+        }
+
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            _isClosing = true;
+            base.OnClosing(e);
+        }
+
+        public void ApplyLanguage()
+        {
+            menuStartTS.Header = Loc.Get("WidgetStartTS");
+            menuOpenWarden.Header = Loc.Get("WidgetOpenWarden");
+            menuHideWidget.Header = Loc.Get("WidgetHide");
+            btnLockToggle.ToolTip = Loc.Get("WidgetLockTip");
+            UpdateLockVisuals();
+        }
+
+        private void OnProfileNamesChanged(object? sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(UpdateProfileButtonLabels);
         }
 
         protected override void OnStateChanged(EventArgs e)
@@ -119,8 +163,8 @@ namespace Warden
             // Prevent Alt+Tab visibility (WS_EX_TOOLWINDOW)
             try
             {
-                int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE).ToInt32();
-                SetWindowLong(hwnd, GWL_EXSTYLE, (IntPtr)(exStyle | WS_EX_TOOLWINDOW));
+                long exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+                SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(exStyle | WS_EX_TOOLWINDOW));
             }
             catch { }
 
@@ -131,6 +175,12 @@ namespace Warden
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            // Kullanıcı widget'ı kapattıysa veya uygulama kapanıyorsa gizleme mesajlarına dokunma.
+            // (Eskiden SWP_HIDEWINDOW her durumda siliniyordu; "Widget'ı Gizle" ve tepsi menüsü
+            //  widget'ı aslında gizleyemiyordu — pencere ekranda kalıyordu.)
+            if (_isClosing || !_config.DesktopWidgetEnabled)
+                return IntPtr.Zero;
+
             // 1. Intercept Win+D / Show Desktop hide command
             if (msg == WM_WINDOWPOSCHANGING)
             {
@@ -159,7 +209,7 @@ namespace Warden
             }
 
             // 2. Prevent Win+D / Show Desktop minimize command
-            if (msg == WM_SYSCOMMAND && (wParam.ToInt32() & 0xFFF0) == SC_MINIMIZE)
+            if (msg == WM_SYSCOMMAND && (wParam.ToInt64() & 0xFFF0) == SC_MINIMIZE)
             {
                 handled = true;
                 return IntPtr.Zero;
@@ -255,19 +305,17 @@ namespace Warden
 
         private void MainCard_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left && !_isLocked)
+            if (e.ChangedButton == MouseButton.Left && e.ButtonState == MouseButtonState.Pressed && !_isLocked)
             {
-                this.DragMove();
+                try { this.DragMove(); } catch (InvalidOperationException) { return; }
+                // DragMove fare bırakılana kadar bloklar; bittiğinde konumu tek seferde kaydet
                 SaveCurrentPosition();
             }
         }
 
         private void MainCard_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left && !_isLocked)
-            {
-                SaveCurrentPosition();
-            }
+            // Konum MouseDown içinde DragMove bittikten sonra kaydedilir (çift kayıt önlenir)
         }
 
         protected override void OnLocationChanged(EventArgs e)
@@ -278,6 +326,8 @@ namespace Warden
 
         private void SaveCurrentPosition()
         {
+            // Sadece tıklamada (sürükleme yoksa) diske yazma
+            if (_config.DesktopWidgetLeft == this.Left && _config.DesktopWidgetTop == this.Top) return;
             _config.DesktopWidgetLeft = this.Left;
             _config.DesktopWidgetTop = this.Top;
             _saveConfigAction();
@@ -299,7 +349,7 @@ namespace Warden
         private void UpdateLockVisuals()
         {
             txtLockIcon.Text = _isLocked ? "🔒" : "🔓";
-            menuLock.Header = _isLocked ? "🔓 Konum Kilidini Aç" : "🔒 Konumu Kilitle";
+            menuLock.Header = _isLocked ? Loc.Get("WidgetUnlock") : Loc.Get("WidgetLock");
             mainCard.Cursor = _isLocked ? Cursors.Arrow : Cursors.SizeAll;
         }
 
@@ -318,11 +368,13 @@ namespace Warden
             _config.DesktopWidgetEnabled = false;
             _saveConfigAction();
             this.Hide();
+            _enabledChangedAction?.Invoke();
         }
 
         protected override void OnClosed(EventArgs e)
         {
             _tsService.ActiveProfileChanged -= OnActiveProfileChanged;
+            _tsService.ProfileNamesChanged -= OnProfileNamesChanged;
             base.OnClosed(e);
         }
     }

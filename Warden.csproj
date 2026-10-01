@@ -11,6 +11,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Paketlerin onlarca dildeki uydu kaynak klasörlerini çıktıya kopyalama (uygulama yalnızca TR/EN) -->
+    <SatelliteResourceLanguages>en;tr</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>

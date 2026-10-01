@@ -83,14 +83,18 @@ namespace Warden
 
                 foreach (var device in activeDevices)
                 {
-                    string id = device.ID;
-                    string name = device.FriendlyName;
-
-                    bool shouldDisable = idSet.Contains(id) || MatchesAnyName(name, nameSet);
-                    if (shouldDisable)
+                    // MMDevice COM nesnesi tutar; her 30 sn'lik denetimde sızıntı olmaması için dispose edilir
+                    using (device)
                     {
-                        Debug.WriteLine($"[AudioEnforcer/AutoEnforce] Disabling active device: {name} ({id})");
-                        SetDeviceState(id, disable: true);
+                        string id = device.ID;
+                        string name = SafeFriendlyName(device);
+
+                        bool shouldDisable = idSet.Contains(id) || MatchesAnyName(name, nameSet);
+                        if (shouldDisable)
+                        {
+                            Debug.WriteLine($"[AudioEnforcer/AutoEnforce] Disabling active device: {name} ({id})");
+                            SetDeviceState(id, disable: true);
+                        }
                     }
                 }
             }
@@ -133,6 +137,16 @@ namespace Warden
             return false;
         }
 
+        /// <summary>
+        /// Çıkarılmış (Unplugged) bazı aygıtlarda özellik deposu okunamaz ve FriendlyName exception fırlatır;
+        /// bu durumda tüm liste boş dönmesin diye aygıt ID'si gösterilir.
+        /// </summary>
+        private static string SafeFriendlyName(MMDevice device)
+        {
+            try { return device.FriendlyName; }
+            catch { return device.ID; }
+        }
+
         public static string CleanDeviceName(string name)
         {
             if (string.IsNullOrEmpty(name)) return "";
@@ -155,14 +169,20 @@ namespace Warden
 
                 foreach (var d in enumerator.EnumerateAudioEndPoints(DataFlow.Render, states))
                 {
-                    if (seen.Add(d.ID))
-                        result.Add((d.ID, d.FriendlyName, true));
+                    using (d)
+                    {
+                        if (seen.Add(d.ID))
+                            result.Add((d.ID, SafeFriendlyName(d), true));
+                    }
                 }
 
                 foreach (var d in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, states))
                 {
-                    if (seen.Add(d.ID))
-                        result.Add((d.ID, d.FriendlyName, false));
+                    using (d)
+                    {
+                        if (seen.Add(d.ID))
+                            result.Add((d.ID, SafeFriendlyName(d), false));
+                    }
                 }
             }
             catch (Exception ex)

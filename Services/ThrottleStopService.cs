@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 
@@ -41,19 +42,22 @@ namespace Warden
         private string _exePath = @"D:\ThrottleStop_9.7\ThrottleStop.exe";
         private string _iniPath = @"D:\ThrottleStop_9.7\ThrottleStop.ini";
         private FileSystemWatcher? _watcher;
-        private DateTime _lastFileRead = DateTime.MinValue;
-        private int _cachedActiveProfile = 0;
-        private string[] _profileNames = new[] { "Performance", "Game", "Internet", "Battery" };
+        private System.Threading.Timer? _iniDebounceTimer;
+        private readonly object _iniLock = new();
+        private volatile int _cachedActiveProfile = 0;
+        private readonly string[] _profileNames = { "Performance", "Game", "Internet", "Battery" };
         private readonly Action<string>? _log;
+        private bool _disposed;
 
         public event EventHandler<int>? ActiveProfileChanged;
+        public event EventHandler? ProfileNamesChanged;
 
         public ThrottleStopService(string? customPath = null, Action<string>? log = null)
         {
             _log = log;
             InitPaths(customPath);
             LoadProfileNames();
-            _cachedActiveProfile = ReadActiveProfileFromIni();
+            _cachedActiveProfile = ReadActiveProfileFromIni() ?? 0;
             SetupWatcher();
         }
 
@@ -71,7 +75,8 @@ namespace Warden
                 {
                     @"D:\ThrottleStop_9.7\ThrottleStop.exe",
                     @"C:\ThrottleStop\ThrottleStop.exe",
-                    @"D:\ThrottleStop\ThrottleStop.exe"
+                    @"D:\ThrottleStop\ThrottleStop.exe",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ThrottleStop", "ThrottleStop.exe")
                 };
 
                 foreach (var c in candidates)
@@ -89,12 +94,15 @@ namespace Warden
         public string ExePath => _exePath;
         public string IniPath => _iniPath;
         public int ActiveProfile => _cachedActiveProfile;
-        public string[] ProfileNames => _profileNames;
+        public string[] ProfileNames { get { lock (_profileNames) return (string[])_profileNames.Clone(); } }
 
         public bool IsRunning()
         {
             if (_cachedHwnd != IntPtr.Zero && IsWindow(_cachedHwnd)) return true;
-            return Process.GetProcessesByName("ThrottleStop").Length > 0;
+            var procs = Process.GetProcessesByName("ThrottleStop");
+            bool running = procs.Length > 0;
+            foreach (var p in procs) p.Dispose();   // Process handle sızıntısını önle
+            return running;
         }
 
         public bool StartThrottleStop()
@@ -109,11 +117,15 @@ namespace Warden
                         WorkingDirectory = Path.GetDirectoryName(_exePath)!,
                         UseShellExecute = true
                     };
-                    Process.Start(psi);
+                    using var _ = Process.Start(psi);
                     return true;
                 }
+                _log?.Invoke($"[THROTTLESTOP WARN] Executable not found: {_exePath}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _log?.Invoke($"[THROTTLESTOP WARN] Failed to start: {ex.Message}");
+            }
             return false;
         }
 
@@ -126,16 +138,30 @@ namespace Warden
 
             if (!IsRunning())
             {
-                StartThrottleStop();
-                // Wait briefly for startup
-                Task.Delay(1000).ContinueWith(_ => SendProfileMessage(profileIndex));
+                if (!StartThrottleStop()) return false;
+
+                // ThrottleStop'un açılış süresi sisteme göre değişir (uyarı penceresi vb.);
+                // sabit 1 sn yerine pencere bulunana kadar ~10 sn boyunca tekrar dene.
+                _ = Task.Run(async () =>
+                {
+                    for (int attempt = 0; attempt < 20; attempt++)
+                    {
+                        await Task.Delay(500);
+                        if (FindAndCacheWindow() != IntPtr.Zero)
+                        {
+                            SendProfileMessage(profileIndex);
+                            return;
+                        }
+                    }
+                    _log?.Invoke($"[THROTTLESTOP WARN] Window did not appear after start; profile {profileIndex + 1} not applied");
+                });
                 return true;
             }
 
             return SendProfileMessage(profileIndex);
         }
 
-        private bool SendProfileMessage(int profileIndex)
+        private IntPtr FindAndCacheWindow()
         {
             IntPtr hDialog = _cachedHwnd;
             if (hDialog == IntPtr.Zero || !IsWindow(hDialog))
@@ -143,6 +169,12 @@ namespace Warden
                 hDialog = FindThrottleStopWindow();
                 _cachedHwnd = hDialog;
             }
+            return hDialog;
+        }
+
+        private bool SendProfileMessage(int profileIndex)
+        {
+            IntPtr hDialog = FindAndCacheWindow();
             int controlId = BASE_PROFILE_CONTROL_ID + profileIndex;
 
             if (hDialog != IntPtr.Zero)
@@ -156,7 +188,7 @@ namespace Warden
 
                 // Send WM_COMMAND to dialog
                 PostMessage(hDialog, WM_COMMAND, (IntPtr)controlId, hRadio);
-                _log?.Invoke($"[THROTTLESTOP] Switched to profile {profileIndex + 1} ({_profileNames[profileIndex]}) via WM_COMMAND {controlId}");
+                _log?.Invoke($"[THROTTLESTOP] Switched to profile {profileIndex + 1} ({ProfileNames[profileIndex]}) via WM_COMMAND {controlId}");
                 return true;
             }
 
@@ -171,49 +203,59 @@ namespace Warden
 
             IntPtr foundHwnd = IntPtr.Zero;
 
-            foreach (var proc in processes)
+            try
             {
-                try
+                foreach (var proc in processes)
                 {
-                    foreach (ProcessThread thread in proc.Threads)
+                    try
                     {
-                        EnumThreadWindows(thread.Id, (hWnd, lParam) =>
+                        foreach (ProcessThread thread in proc.Threads)
                         {
-                            var cls = new StringBuilder(256);
-                            GetClassName(hWnd, cls, 256);
-
-                            if (cls.ToString() == "#32770")
+                            EnumThreadWindows(thread.Id, (hWnd, lParam) =>
                             {
-                                var title = new StringBuilder(256);
-                                GetWindowText(hWnd, title, 256);
-                                if (title.ToString().Contains("ThrottleStop"))
+                                var cls = new StringBuilder(256);
+                                GetClassName(hWnd, cls, 256);
+
+                                if (cls.ToString() == "#32770")
                                 {
-                                    foundHwnd = hWnd;
-                                    return false; // Stop enumeration
+                                    var title = new StringBuilder(256);
+                                    GetWindowText(hWnd, title, 256);
+                                    if (title.ToString().Contains("ThrottleStop"))
+                                    {
+                                        foundHwnd = hWnd;
+                                        return false; // Stop enumeration
+                                    }
                                 }
-                            }
-                            return true;
-                        }, IntPtr.Zero);
+                                return true;
+                            }, IntPtr.Zero);
 
-                        if (foundHwnd != IntPtr.Zero) break;
+                            if (foundHwnd != IntPtr.Zero) break;
+                        }
                     }
-                }
-                catch { }
+                    catch { }
 
-                if (foundHwnd != IntPtr.Zero) break;
+                    if (foundHwnd != IntPtr.Zero) break;
+                }
+            }
+            finally
+            {
+                foreach (var p in processes) p.Dispose();
             }
 
             return foundHwnd;
         }
 
-        private int ReadActiveProfileFromIni()
+        /// <summary>
+        /// INI'deki aktif profili okur. Dosya yoksa, kilitliyse veya değer bulunamazsa null döner —
+        /// eskiden 0 dönüyordu ve ThrottleStop dosyayı yazarken okunursa widget yanlışlıkla Profil 1'e atlıyordu.
+        /// </summary>
+        private int? ReadActiveProfileFromIni()
         {
             try
             {
                 if (File.Exists(_iniPath))
                 {
-                    var lines = File.ReadAllLines(_iniPath);
-                    foreach (var line in lines)
+                    foreach (var line in ReadIniLines())
                     {
                         var trimmed = line.Trim();
                         if (trimmed.StartsWith("Profile=", StringComparison.OrdinalIgnoreCase))
@@ -228,31 +270,50 @@ namespace Warden
                 }
             }
             catch { }
-            return 0;
+            return null;
         }
 
-        private void LoadProfileNames()
+        /// <summary>ThrottleStop dosyayı yazarken de okuyabilmek için paylaşımlı modda açar.</summary>
+        private string[] ReadIniLines()
+        {
+            using var fs = new FileStream(_iniPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var sr = new StreamReader(fs);
+            return sr.ReadToEnd().Split('\n');
+        }
+
+        /// <summary>Profil adlarını INI'den okur; değiştiyse true döner.</summary>
+        private bool LoadProfileNames()
         {
             try
             {
-                if (File.Exists(_iniPath))
+                if (!File.Exists(_iniPath)) return false;
+
+                bool changed = false;
+                foreach (var line in ReadIniLines())
                 {
-                    var lines = File.ReadAllLines(_iniPath);
-                    foreach (var line in lines)
+                    var trimmed = line.Trim();
+                    for (int i = 0; i < 4; i++)
                     {
-                        var trimmed = line.Trim();
-                        if (trimmed.StartsWith("ProfileName1=", StringComparison.OrdinalIgnoreCase))
-                            _profileNames[0] = trimmed.Substring("ProfileName1=".Length).Trim();
-                        else if (trimmed.StartsWith("ProfileName2=", StringComparison.OrdinalIgnoreCase))
-                            _profileNames[1] = trimmed.Substring("ProfileName2=".Length).Trim();
-                        else if (trimmed.StartsWith("ProfileName3=", StringComparison.OrdinalIgnoreCase))
-                            _profileNames[2] = trimmed.Substring("ProfileName3=".Length).Trim();
-                        else if (trimmed.StartsWith("ProfileName4=", StringComparison.OrdinalIgnoreCase))
-                            _profileNames[3] = trimmed.Substring("ProfileName4=".Length).Trim();
+                        string key = $"ProfileName{i + 1}=";
+                        if (trimmed.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                        {
+                            string name = trimmed.Substring(key.Length).Trim();
+                            if (string.IsNullOrEmpty(name)) break; // Boş ad → varsayılanı koru
+                            lock (_profileNames)
+                            {
+                                if (_profileNames[i] != name)
+                                {
+                                    _profileNames[i] = name;
+                                    changed = true;
+                                }
+                            }
+                            break;
+                        }
                     }
                 }
+                return changed;
             }
-            catch { }
+            catch { return false; }
         }
 
         private void SetupWatcher()
@@ -264,13 +325,17 @@ namespace Warden
 
                 if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
                 {
+                    _iniDebounceTimer = new System.Threading.Timer(_ => ProcessIniChange(), null, Timeout.Infinite, Timeout.Infinite);
+
                     _watcher = new FileSystemWatcher(dir, file)
                     {
-                        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
                         EnableRaisingEvents = true
                     };
 
                     _watcher.Changed += OnIniChanged;
+                    _watcher.Created += OnIniChanged;
+                    _watcher.Renamed += OnIniChanged;
                 }
             }
             catch { }
@@ -278,25 +343,38 @@ namespace Warden
 
         private void OnIniChanged(object sender, FileSystemEventArgs e)
         {
-            if ((DateTime.Now - _lastFileRead).TotalMilliseconds < 200) return;
-            _lastFileRead = DateTime.Now;
-
-            // Small delay to allow file write release
-            Task.Delay(100).ContinueWith(_ =>
+            // Trailing-edge debounce: art arda gelen yazma olaylarında son yazmadan 250 ms sonra bir kez oku.
+            // (Eski leading-edge yaklaşım, ilk olayda yarım yazılmış dosyayı okuyup son değişikliği kaçırabiliyordu.)
+            lock (_iniLock)
             {
-                int newProfile = ReadActiveProfileFromIni();
-                if (newProfile != _cachedActiveProfile)
-                {
-                    _cachedActiveProfile = newProfile;
-                    ActiveProfileChanged?.Invoke(this, newProfile);
-                }
-            });
+                if (_disposed) return;
+                _iniDebounceTimer?.Change(250, Timeout.Infinite);
+            }
+        }
+
+        private void ProcessIniChange()
+        {
+            if (LoadProfileNames())
+                ProfileNamesChanged?.Invoke(this, EventArgs.Empty);
+
+            int? newProfile = ReadActiveProfileFromIni();
+            if (newProfile.HasValue && newProfile.Value != _cachedActiveProfile)
+            {
+                _cachedActiveProfile = newProfile.Value;
+                ActiveProfileChanged?.Invoke(this, newProfile.Value);
+            }
         }
 
         public void Dispose()
         {
-            _watcher?.Dispose();
-            _watcher = null;
+            lock (_iniLock)
+            {
+                _disposed = true;
+                _watcher?.Dispose();
+                _watcher = null;
+                _iniDebounceTimer?.Dispose();
+                _iniDebounceTimer = null;
+            }
         }
     }
 }

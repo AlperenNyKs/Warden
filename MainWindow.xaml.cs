@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Navigation;
 using MessageBox  = System.Windows.MessageBox;
 using Color       = System.Windows.Media.Color;
 using Brush       = System.Windows.Media.Brush;
@@ -36,6 +34,25 @@ namespace Warden
         private readonly Dictionary<string, TextBlock> _favoriteValControls = new();
         private string _lastCategoryStructureKey = "";
         private string _lastFavoritesKey = "";
+        private bool _telemetryInitialized = false;
+        private bool _isLoadingPresets = false;
+        private bool _presetsLoaded = false;
+        private bool _suppressPresetSave = false;
+        private bool _isPopulatingControls = false;   // Kontroller config'den doldurulurken kaydetme olaylarını yok say
+
+        // Telemetri sayfası her saniye yenilenir; fırçalar her seferinde yeniden oluşturulmak yerine önbelleğe alınır
+        private static readonly Dictionary<string, SolidColorBrush> BrushCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static SolidColorBrush BrushFrom(string hex)
+        {
+            if (!BrushCache.TryGetValue(hex, out var brush))
+            {
+                brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+                brush.Freeze();
+                BrushCache[hex] = brush;
+            }
+            return brush;
+        }
 
         // ── Init ───────────────────────────────────────────────────────
         public MainWindow(TrayApplicationContext context, SteelSeriesClient client)
@@ -49,9 +66,9 @@ namespace Warden
             if (_context.Config.WindowHeight >= MinHeight) this.Height = _context.Config.WindowHeight;
             this.SizeChanged += MainWindow_SizeChanged;
 
-            // Initialize Hardware Monitor Service
+            // Hardware Monitor Service: LibreHardwareMonitor (çekirdek sürücüsü yükler, ağırdır) artık
+            // uygulama açılışında değil, telemetri sayfası ilk kez açıldığında başlatılır.
             _hardwareMonitor = new HardwareMonitorService();
-            _hardwareMonitor.Initialize(_context.Config.TelemetryFavorites, _context.Config.TelemetryGraphSensors);
             _hardwareMonitor.TelemetryUpdated += OnTelemetryUpdated;
 
             this.IsVisibleChanged += (s, e) =>
@@ -60,6 +77,10 @@ namespace Warden
                     StartTelemetry();
                 else
                     StopTelemetry();
+
+                // GG açılışta kapalıysa preset listesi boş kalıyordu; pencere her açıldığında tekrar dene
+                if (this.IsVisible)
+                    RefreshPresetsIfNeeded();
             };
 
             LoadInitialConfig();
@@ -84,9 +105,15 @@ namespace Warden
                 if (!_isSavingSize)
                 {
                     _isSavingSize = true;
-                    await Task.Delay(1000);
-                    _context.SaveConfig();
-                    _isSavingSize = false;
+                    try
+                    {
+                        await Task.Delay(1000);
+                        _context.SaveConfig();
+                    }
+                    finally
+                    {
+                        _isSavingSize = false;
+                    }
                 }
             }
         }
@@ -119,9 +146,6 @@ namespace Warden
                 : WindowState.Maximized;
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)
-            => Hide();
-
-        private void BtnHide_Click(object sender, RoutedEventArgs e)
             => Hide();
 
         public bool IsExitExplicit = false;
@@ -198,6 +222,7 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         private void LoadInitialConfig()
         {
+            _isPopulatingControls = true;
             try
             {
                 txtInterval.Text   = _context.Config.CheckIntervalMilliseconds.ToString();
@@ -218,7 +243,7 @@ namespace Warden
                 }
 
                 // GPU Initial Values
-                txtTargetMhz.Text = _context.Config.TargetMhz.ToString();
+                txtTargetMhz.Text = _context.Config.TargetMhz.ToString(System.Globalization.CultureInfo.CurrentCulture);
                 foreach (ComboBoxItem item in cbTargetProfile.Items)
                 {
                     if (item.Tag?.ToString() == _context.Config.TargetProfile.ToString())
@@ -240,34 +265,51 @@ namespace Warden
             {
                 MessageBox.Show($"Config load error: {ex.Message}");
             }
+            finally
+            {
+                _isPopulatingControls = false;
+            }
         }
 
         private async Task LoadSonarPresetsAsync()
         {
+            if (_isLoadingPresets) return;
+            _isLoadingPresets = true;
+
             txtConnectionStatus.Text = Loc.Get("Connecting");
             ledStatus.Fill = new SolidColorBrush(Color.FromRgb(120, 120, 160));
 
             try
             {
                 string address = await _client.GetSonarAddressAsync();
-                txtConnectionStatus.Text = $"● {address.Replace("http://", "")}";
+                txtConnectionStatus.Text = $"● {address.Replace("http://", "").Replace("https://", "")}";
                 ledStatus.Fill = new SolidColorBrush(Color.FromRgb(78, 201, 126));
 
                 _availablePresets = await _client.GetConfigsAsync();
 
-                cbDefaultPreset.Items.Clear();
-
-                foreach (var preset in _availablePresets)
+                // Listeyi yeniden doldururken SelectionChanged → SaveConfig/ReloadConfig zinciri tetiklenmesin
+                _suppressPresetSave = true;
+                try
                 {
-                    if (preset.virtualAudioDevice == "game")
+                    cbDefaultPreset.Items.Clear();
+
+                    foreach (var preset in _availablePresets)
                     {
-                        cbDefaultPreset.Items.Add(new PresetComboBoxItem { Text = preset.name, Value = preset.id });
+                        if (preset.virtualAudioDevice == "game")
+                        {
+                            cbDefaultPreset.Items.Add(new PresetComboBoxItem { Text = preset.name, Value = preset.id });
+                        }
                     }
+
+                    if (!string.IsNullOrEmpty(_context.Config.DefaultPresetId))
+                        SelectComboBoxByValue(cbDefaultPreset, _context.Config.DefaultPresetId);
+                }
+                finally
+                {
+                    _suppressPresetSave = false;
                 }
 
-                if (!string.IsNullOrEmpty(_context.Config.DefaultPresetId))
-                    SelectComboBoxByValue(cbDefaultPreset, _context.Config.DefaultPresetId);
-
+                _presetsLoaded = true;
                 RenderRulesList();
             }
             catch (Exception ex)
@@ -276,6 +318,47 @@ namespace Warden
                 ledStatus.Fill = new SolidColorBrush(Color.FromRgb(224, 85, 85));
                 txtActivePreset.Text = ex.Message;
             }
+            finally
+            {
+                _isLoadingPresets = false;
+            }
+        }
+
+        /// <summary>Preset listesi henüz yüklenemediyse (GG kapalıydı vb.) yeniden dener.</summary>
+        public void RefreshPresetsIfNeeded()
+        {
+            if (_presetsLoaded || _isLoadingPresets) return;
+            _client.ResetAddress();
+            _ = LoadSonarPresetsAsync();
+        }
+
+        /// <summary>Tray'den "Reload Config" sonrası arayüzü yeni config ile yeniden doldurur.</summary>
+        public void ReloadFromConfig()
+        {
+            _telemetryInitialized = false;
+            LoadInitialConfig();
+            _suppressPresetSave = true;
+            try
+            {
+                if (!string.IsNullOrEmpty(_context.Config.DefaultPresetId))
+                    SelectComboBoxByValue(cbDefaultPreset, _context.Config.DefaultPresetId);
+                else
+                    cbDefaultPreset.SelectedIndex = -1;
+            }
+            finally
+            {
+                _suppressPresetSave = false;
+            }
+            if (_currentPage == "telemetry" && IsVisible) StartTelemetry();
+        }
+
+        /// <summary>Widget tepsi menüsünden / widget üzerinden açılıp kapatıldığında onay kutusunu senkronlar.</summary>
+        public void SyncDesktopWidgetState()
+        {
+            bool enabled = _context.Config.DesktopWidgetEnabled;
+            if (chkDesktopWidget.IsChecked != enabled)
+                chkDesktopWidget.IsChecked = enabled; // ChkDesktopWidget_Changed config ile aynı olduğu için tekrar kaydetmez
+            panelWidgetProfiles.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -383,20 +466,18 @@ namespace Warden
             // Save logic
             Action saveRule = () =>
             {
-                string newKey = cbExe.Text.Trim();
-                if (newKey.EndsWith(")") && newKey.Contains("("))
-                {
-                    int start = newKey.LastIndexOf('(');
-                    newKey = newKey.Substring(start + 1, newKey.Length - start - 2).Trim();
-                }
+                string newKey = ExtractExeName(cbExe.Text);
 
                 var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
 
                 if (string.IsNullOrEmpty(newKey) || selectedPreset == null) return;
 
-                // Hiçbir şey değişmediyse gereksiz kayıt/reload yapma
+                // Hiçbir şey değişmediyse gereksiz kayıt/reload yapma.
+                // Not: karşılaştırma config'deki GÜNCEL değerle yapılır; eskiden satır oluşturulurken yakalanan
+                // ilk değerle yapılıyordu ve A→B→A geri dönüşü hiç kaydedilmiyordu.
                 bool keyChanged = !newKey.Equals(originalKey, StringComparison.OrdinalIgnoreCase);
-                bool presetChanged = selectedPreset.Value != currentPresetId;
+                _context.Config.Rules.TryGetValue(originalKey, out string? savedPresetId);
+                bool presetChanged = selectedPreset.Value != savedPresetId;
                 if (!keyChanged && !presetChanged) return;
 
                 if (keyChanged)
@@ -416,7 +497,7 @@ namespace Warden
                 }
             };
 
-            cbExe.LostFocus += (s, e) => saveRule();
+            cbExe.SelectionChanged += (s, e) => saveRule();
             cbPreset.SelectionChanged += (s, e) => saveRule();
 
             rowBorder.Child = grid;
@@ -464,7 +545,7 @@ namespace Warden
 
             var btnAdd = new Button
             {
-                Content = "+ Ekle",
+                Content = "+ " + Loc.Get("BtnAddManual"),
                 Style = (Style)FindResource("AccentButton"),
                 Padding = new Thickness(10, 5, 10, 5),
                 Margin = new Thickness(12, 0, 0, 0),
@@ -473,12 +554,7 @@ namespace Warden
 
             Action addRule = () =>
             {
-                string newKey = cbExe.Text.Trim();
-                if (newKey.EndsWith(")") && newKey.Contains("("))
-                {
-                    int start = newKey.LastIndexOf('(');
-                    newKey = newKey.Substring(start + 1, newKey.Length - start - 2).Trim();
-                }
+                string newKey = ExtractExeName(cbExe.Text);
 
                 var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
 
@@ -505,9 +581,23 @@ namespace Warden
         //  UI Event Handlers – Profiles Page
         // ══════════════════════════════════════════════════════════════
 
+        /// <summary>"Oyun Adı (oyun.exe)" biçimindeki görünen metinden exe adını çıkarır.</summary>
+        private static string ExtractExeName(string text)
+        {
+            string key = (text ?? "").Trim();
+            if (key.EndsWith(")") && key.Contains('('))
+            {
+                int start = key.LastIndexOf('(');
+                key = key.Substring(start + 1, key.Length - start - 2).Trim();
+            }
+            return key;
+        }
+
         private void CbDefaultPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (cbDefaultPreset.SelectedItem is PresetComboBoxItem item)
+            if (_suppressPresetSave) return;
+            if (cbDefaultPreset.SelectedItem is PresetComboBoxItem item &&
+                item.Value != _context.Config.DefaultPresetId)
             {
                 _context.Config.DefaultPresetId = item.Value;
                 _context.SaveConfig();
@@ -515,63 +605,52 @@ namespace Warden
             }
         }
 
-        private void BtnDeleteRule_Click(object sender, RoutedEventArgs e)
+        private async void BtnScan_Click(object sender, RoutedEventArgs e)
         {
-            string? key = (sender as Button)?.Tag as string;
-            if (string.IsNullOrEmpty(key)) return;
-
-            _context.Config.Rules.Remove(key);
-            _context.SaveConfig();
-            _context.ReloadConfig();
-            RenderRulesList();
-        }
-
-        private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
-        {
-            _client.ResetAddress();
-            await LoadSonarPresetsAsync();
-        }
-
-        private void BtnScan_Click(object sender, RoutedEventArgs e)
-        {
-            lblScanBtn.Text = "Scanning...";
+            lblScanBtn.Text = Loc.Get("Scanning");
             btnScan.IsEnabled = false;
 
-            Task.Run(() =>
+            try
             {
-                var games = GameScanner.ScanAllGames();
-                Dispatcher.Invoke(() =>
-                {
-                    int added = 0;
-                    foreach (var g in games)
-                    {
-                        if (!_context.Config.DiscoveredGames.Contains(g.ExeName, StringComparer.OrdinalIgnoreCase))
-                        {
-                            _context.Config.DiscoveredGames.Add(g.ExeName);
-                            added++;
-                        }
-                        if (!string.IsNullOrEmpty(g.GameName))
-                        {
-                            _context.Config.DiscoveredGameNames[g.ExeName] = g.GameName;
-                        }
-                    }
-                    _context.SaveConfig();
-                    RenderRulesList();
-                    lblScanBtn.Text = Loc.Get("BtnScan");
-                    btnScan.IsEnabled = true;
+                var games = await Task.Run(GameScanner.ScanAllGames);
 
-                    if (added > 0)
+                int added = 0;
+                foreach (var g in games)
+                {
+                    if (!_context.Config.DiscoveredGames.Contains(g.ExeName, StringComparer.OrdinalIgnoreCase))
                     {
-                        txtActivePreset.Text = Loc.Get("ScanDone").Replace("{0}", added.ToString());
-                        ledActive.Fill = new SolidColorBrush(Color.FromRgb(78, 201, 126));
+                        _context.Config.DiscoveredGames.Add(g.ExeName);
+                        added++;
                     }
-                    else
+                    if (!string.IsNullOrEmpty(g.GameName))
                     {
-                        txtActivePreset.Text = Loc.Get("ScanNone");
-                        ledActive.Fill = new SolidColorBrush(Color.FromRgb(120, 120, 160));
+                        _context.Config.DiscoveredGameNames[g.ExeName] = g.GameName;
                     }
-                });
-            });
+                }
+                _context.SaveConfig();
+                RenderRulesList();
+
+                if (added > 0)
+                {
+                    txtActivePreset.Text = Loc.Format("ScanDone", added);
+                    ledActive.Fill = new SolidColorBrush(Color.FromRgb(78, 201, 126));
+                }
+                else
+                {
+                    txtActivePreset.Text = Loc.Get("ScanNone");
+                    ledActive.Fill = new SolidColorBrush(Color.FromRgb(120, 120, 160));
+                }
+            }
+            catch (Exception ex)
+            {
+                txtActivePreset.Text = ex.Message;
+            }
+            finally
+            {
+                // Hata olsa bile buton tekrar kullanılabilir olmalı (eskiden kalıcı olarak devre dışı kalabiliyordu)
+                lblScanBtn.Text = Loc.Get("BtnScan");
+                btnScan.IsEnabled = true;
+            }
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -579,10 +658,17 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         private void AutoSaveSettings()
         {
-            if (!IsLoaded || _context == null) return;
+            if (!IsLoaded || _context == null || _isPopulatingControls) return;
+            ApplySettingsFromUi();
+        }
 
+        private void ApplySettingsFromUi()
+        {
+            // 0, negatif veya çok küçük değer watcher Timer'ını bozuyordu (0 = tek sefer, negatif = exception)
             if (int.TryParse(txtInterval.Text, out int interval))
-                _context.Config.CheckIntervalMilliseconds = interval;
+                _context.Config.CheckIntervalMilliseconds =
+                    Math.Clamp(interval, AppConfig.MinCheckIntervalMs, AppConfig.MaxCheckIntervalMs);
+            txtInterval.Text = _context.Config.CheckIntervalMilliseconds.ToString();
 
             _context.Config.StartWithWindows = chkStartup.IsChecked == true;
 
@@ -600,7 +686,7 @@ namespace Warden
 
         private void ChkDesktopWidget_Changed(object sender, RoutedEventArgs e)
         {
-            if (_context == null) return;
+            if (_context == null || _isPopulatingControls) return;
             bool enabled = chkDesktopWidget.IsChecked == true;
             panelWidgetProfiles.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
             if (_context.Config.DesktopWidgetEnabled != enabled)
@@ -616,7 +702,7 @@ namespace Warden
 
         private void ChkWidgetProfile_Changed(object sender, RoutedEventArgs e)
         {
-            if (!IsLoaded || _context == null) return;
+            if (!IsLoaded || _context == null || _isPopulatingControls) return;
 
             var list = new List<int>();
             if (chkWidgetProf1.IsChecked == true) list.Add(0);
@@ -639,12 +725,6 @@ namespace Warden
         private void TxtInterval_LostFocus(object sender, RoutedEventArgs e)
         {
             AutoSaveSettings();
-        }
-
-        private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
-        {
-            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
-            e.Handled = true;
         }
 
         private void LoadAudioDevices()
@@ -675,23 +755,43 @@ namespace Warden
 
             if (listAudioDevices.ItemsSource is List<AudioDeviceViewModel> vmList)
             {
-                _context.Config.DisabledDevices.Clear();
-                _context.Config.DisabledDeviceNames.Clear();
+                // Yeni listeler oluşturulup tek seferde atanır: arka plandaki denetim zamanlayıcısı
+                // eski listeyi gezerken Clear/Add yapılması "Collection was modified" hatasına yol açıyordu.
+                var ids = new List<string>();
+                var names = new List<string>();
 
                 foreach (var vm in vmList)
                 {
                     if (vm.IsDisabled)
                     {
-                        _context.Config.DisabledDevices.Add(vm.Id);
+                        ids.Add(vm.Id);
                         string cleanName = AudioDeviceEnforcer.CleanDeviceName(vm.FriendlyName);
-                        if (!string.IsNullOrEmpty(cleanName) && !_context.Config.DisabledDeviceNames.Contains(cleanName))
+                        if (!string.IsNullOrEmpty(cleanName) && !names.Contains(cleanName, StringComparer.OrdinalIgnoreCase))
                         {
-                            _context.Config.DisabledDeviceNames.Add(cleanName);
+                            names.Add(cleanName);
                         }
                     }
-                    AudioDeviceEnforcer.SetDeviceState(vm.Id, vm.IsDisabled);
                 }
+
+                _context.Config.DisabledDevices = ids;
+                _context.Config.DisabledDeviceNames = names;
                 _context.SaveConfig();
+
+                // COM çağrıları cihaz sayısına göre zaman alabilir → UI'yı dondurmamak için arka planda
+                var changes = vmList.Select(vm => (vm.Id, vm.IsDisabled)).ToList();
+                btnSaveDevices.IsEnabled = false;
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        foreach (var (id, disabled) in changes)
+                            AudioDeviceEnforcer.SetDeviceState(id, disabled);
+                    });
+                }
+                finally
+                {
+                    btnSaveDevices.IsEnabled = true;
+                }
 
                 txtSavedDevice.Visibility = Visibility.Visible;
                 await System.Threading.Tasks.Task.Delay(3000);
@@ -716,32 +816,35 @@ namespace Warden
 
         private void CbLanguage_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_context == null || _isPopulatingControls) return;
             if (cbLanguage.SelectedItem is ComboBoxItem item && item.Tag != null)
             {
                 string lang = item.Tag.ToString() ?? "TR";
+                bool changed = lang != Loc.CurrentLang;
                 Loc.CurrentLang = lang;
                 _context.Config.Language = lang;
                 ApplyLanguage();
                 AutoSaveSettings();
+
+                if (changed && IsLoaded)
+                {
+                    // Dinamik oluşturulan satırlar ve sensör adları da yeni dile geçsin
+                    RenderRulesList();
+                    _lastCategoryStructureKey = "";
+                    _lastFavoritesKey = "";
+                    _context.ApplyLanguageToWidget();
+                }
             }
         }
 
-        private void BtnSaveSettings_Click(object sender, RoutedEventArgs e)
+        private async void BtnSaveSettings_Click(object sender, RoutedEventArgs e)
         {
-            if (int.TryParse(txtInterval.Text, out int interval))
-                _context.Config.CheckIntervalMilliseconds = interval;
-
-            _context.Config.StartWithWindows = chkStartup.IsChecked == true;
-
-            if (cbLanguage.SelectedItem is ComboBoxItem langItem)
-                _context.Config.Language = langItem.Tag?.ToString() ?? "TR";
-
-            _context.SaveConfig();
-            _context.ReloadConfig();
+            ApplySettingsFromUi();
 
             // Brief feedback on button
-            lblSaveBtn.Text = "✓ Saved";
-            Task.Delay(1500).ContinueWith(_ => Dispatcher.Invoke(() => lblSaveBtn.Text = Loc.Get("BtnSave")));
+            lblSaveBtn.Text = Loc.Get("SavedSuccess");
+            await Task.Delay(1500);
+            lblSaveBtn.Text = Loc.Get("BtnSave");
         }
 
         private void BtnClearGames_Click(object sender, RoutedEventArgs e)
@@ -781,7 +884,9 @@ namespace Warden
 
             if (string.IsNullOrEmpty(exe)) return;
 
-            if (!exe.ToLower().EndsWith(".exe"))
+            exe = System.IO.Path.GetFileName(exe); // Tam yol yapıştırılırsa yalnızca dosya adını al
+            if (string.IsNullOrEmpty(exe)) return;
+            if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 exe += ".exe";
 
             if (!_context.Config.DiscoveredGames.Contains(exe, StringComparer.OrdinalIgnoreCase))
@@ -806,10 +911,12 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         private void GpuSetting_Changed(object sender, RoutedEventArgs e)
         {
-            if (!IsLoaded || _context == null) return;
+            if (!IsLoaded || _context == null || _isPopulatingControls) return;
 
-            if (double.TryParse(txtTargetMhz.Text, out double mhz))
+            if (double.TryParse(txtTargetMhz.Text, out double mhz) && mhz >= 0 && !double.IsInfinity(mhz))
                 _context.Config.TargetMhz = mhz;
+            else
+                txtTargetMhz.Text = _context.Config.TargetMhz.ToString(System.Globalization.CultureInfo.CurrentCulture);
 
             if (cbTargetProfile.SelectedItem is ComboBoxItem profileItem && int.TryParse(profileItem.Tag?.ToString(), out int profile))
                 _context.Config.TargetProfile = profile;
@@ -826,7 +933,7 @@ namespace Warden
             txtGpuTemp.Text = data.TemperatureCelsius.ToString();
             txtGpuUsage.Text = data.UsagePercentage.ToString();
 
-            if (data.CoreClockMhz > _context.Config.TargetMhz)
+            if (_context.Config.TargetMhz > 0 && data.CoreClockMhz > _context.Config.TargetMhz)
                 txtGpuClock.Foreground = (Brush)FindResource("Red");
             else
                 txtGpuClock.Foreground = (Brush)FindResource("TxtPrimary");
@@ -883,6 +990,30 @@ namespace Warden
             lblFavoritesTitle.Text      = Loc.Get("FavoritesTitle");
             lblLiveGraphTitle.Text      = Loc.Get("LiveGraphTitle");
             txtNoGraphHint.Text         = Loc.Get("NoGraphSensorsHint");
+            lblChartNow.Text            = Loc.Get("ChartNow");
+
+            // Önceden XAML'de sabit Türkçe kalan metinler
+            lblProfilesDesc.Text        = Loc.Get("ProfilesDesc");
+            lblDefaultEQDesc.Text       = Loc.Get("DefaultEQDesc");
+            lblColPreset.Text           = Loc.Get("ColPreset");
+            lblDeviceDelay.Text         = Loc.Get("DeviceDelay");
+            lblGpuMonitorDesc.Text      = Loc.Get("GpuMonitorDesc");
+            lblSettingsDesc.Text        = Loc.Get("SettingsDesc");
+            lblWidgetProfilesTitle.Text = Loc.Get("WidgetProfilesTitle");
+            chkWidgetProf1.Content      = Loc.Get("WidgetProf1");
+            chkWidgetProf2.Content      = Loc.Get("WidgetProf2");
+            chkWidgetProf3.Content      = Loc.Get("WidgetProf3");
+            chkWidgetProf4.Content      = Loc.Get("WidgetProf4");
+            btnTitleMinimize.ToolTip    = Loc.Get("TipMinimize");
+            btnTitleMaximize.ToolTip    = Loc.Get("TipMaximize");
+            btnTitleClose.ToolTip       = Loc.Get("TipClose");
+            btnNavHome.ToolTip          = Loc.Get("NavProfiles");
+            btnNavSettings.ToolTip      = Loc.Get("Settings");
+
+            foreach (ComboBoxItem item in cbTargetProfile.Items)
+                item.Content = Loc.Format("ProfileN", item.Tag);
+            foreach (ComboBoxItem item in cbCooldown.Items)
+                item.Content = Loc.Format("SecondsN", item.Tag);
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -890,7 +1021,14 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         private void StartTelemetry()
         {
-            _hardwareMonitor?.Start(1000);
+            if (_hardwareMonitor == null) return;
+
+            if (!_telemetryInitialized)
+            {
+                _telemetryInitialized = true;
+                _hardwareMonitor.Initialize(_context.Config.TelemetryFavorites, _context.Config.TelemetryGraphSensors);
+            }
+            _hardwareMonitor.Start(1000);
         }
 
         private void StopTelemetry()
@@ -947,8 +1085,8 @@ namespace Warden
             {
                 var card = new Border
                 {
-                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#081517")),
-                    BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#16363B")),
+                    Background = BrushFrom("#081517"),
+                    BorderBrush = BrushFrom("#16363B"),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(12, 8, 12, 8),
@@ -964,7 +1102,7 @@ namespace Warden
 
                 var badgeBorder = new Border
                 {
-                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#103035")),
+                    Background = BrushFrom("#103035"),
                     CornerRadius = new CornerRadius(4),
                     Padding = new Thickness(5, 1, 5, 1),
                     HorizontalAlignment = HorizontalAlignment.Left
@@ -983,7 +1121,7 @@ namespace Warden
                 var btnStar = new Button
                 {
                     Content = "★",
-                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FACC15")),
+                    Foreground = BrushFrom("#FACC15"),
                     Background = Brushes.Transparent,
                     BorderThickness = new Thickness(0),
                     Cursor = Cursors.Hand,
@@ -1046,8 +1184,8 @@ namespace Warden
             {
                 var badge = new Border
                 {
-                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0A1618")),
-                    BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#183338")),
+                    Background = BrushFrom("#0A1618"),
+                    BorderBrush = BrushFrom("#183338"),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(8, 4, 8, 4),
@@ -1063,7 +1201,7 @@ namespace Warden
                     RadiusX = 2,
                     RadiusY = 2,
                     Margin = new Thickness(0, 0, 6, 0),
-                    Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.GraphColor)),
+                    Fill = BrushFrom(s.GraphColor),
                     VerticalAlignment = VerticalAlignment.Center
                 };
                 sp.Children.Add(colorDot);
@@ -1071,7 +1209,7 @@ namespace Warden
                 var txt = new TextBlock
                 {
                     Text = $"{s.Name}: {s.FormattedValue}",
-                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#C5DCDE")),
+                    Foreground = BrushFrom("#C5DCDE"),
                     FontSize = 10,
                     FontWeight = FontWeights.SemiBold,
                     VerticalAlignment = VerticalAlignment.Center
@@ -1081,7 +1219,7 @@ namespace Warden
                 var btnRemove = new Button
                 {
                     Content = "✕",
-                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#607B80")),
+                    Foreground = BrushFrom("#607B80"),
                     Background = Brushes.Transparent,
                     BorderThickness = new Thickness(0),
                     Margin = new Thickness(6, 0, 0, 0),
@@ -1133,7 +1271,7 @@ namespace Warden
             {
                 if (s.History.Count < 2) continue;
 
-                var strokeBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.GraphColor));
+                var strokeBrush = BrushFrom(s.GraphColor);
                 var points = new PointCollection();
                 int count = s.History.Count;
                 double stepX = width / 59.0;
@@ -1186,12 +1324,10 @@ namespace Warden
                         {
                             row.txtVal.Text = item.FormattedValue;
                             row.btnStar.Content = item.IsFavorite ? "★" : "☆";
-                            row.btnStar.Foreground = item.IsFavorite 
-                                ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FACC15")) 
-                                : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B"));
-                            row.btnGraph.Foreground = item.IsOnGraph
-                                ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(item.GraphColor))
-                                : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B"));
+                            row.btnStar.Foreground = BrushFrom(item.IsFavorite ? "#FACC15" : "#3E565B");
+                            row.btnStar.ToolTip = item.IsFavorite ? Loc.Get("UnpinFromFavorites") : Loc.Get("PinToFavorites");
+                            row.btnGraph.Foreground = BrushFrom(item.IsOnGraph ? item.GraphColor : "#3E565B");
+                            row.btnGraph.ToolTip = item.IsOnGraph ? Loc.Get("RemoveFromGraph") : Loc.Get("PlotOnGraph");
                         }
                     }
                 }
@@ -1281,8 +1417,8 @@ namespace Warden
                     {
                         Content = item.IsFavorite ? "★" : "☆",
                         Foreground = item.IsFavorite 
-                            ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FACC15")) 
-                            : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B")),
+                            ? BrushFrom("#FACC15") 
+                            : BrushFrom("#3E565B"),
                         Background = Brushes.Transparent,
                         BorderThickness = new Thickness(0),
                         Cursor = Cursors.Hand,
@@ -1305,8 +1441,8 @@ namespace Warden
                     {
                         Content = "📈",
                         Foreground = item.IsOnGraph
-                            ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(item.GraphColor))
-                            : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B")),
+                            ? BrushFrom(item.GraphColor)
+                            : BrushFrom("#3E565B"),
                         Background = Brushes.Transparent,
                         BorderThickness = new Thickness(0),
                         Cursor = Cursors.Hand,
@@ -1378,7 +1514,7 @@ namespace Warden
                     Y1 = y,
                     X2 = width,
                     Y2 = y,
-                    Stroke = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0E1D20")),
+                    Stroke = BrushFrom("#0E1D20"),
                     StrokeThickness = 1,
                     StrokeDashArray = new DoubleCollection { 3, 3 }
                 };

@@ -1,4 +1,4 @@
-﻿<Window x:Class="Warden.MainWindow"
+<Window x:Class="Warden.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Warden"
@@ -436,17 +436,17 @@
                 <!-- Right Standard Windows 11 Buttons -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <!-- Minimize -->
-                    <Button Style="{StaticResource Win11TitleButton}" Click="MinimizeButton_Click" ToolTip="Küçült">
+                    <Button x:Name="btnTitleMinimize" Style="{StaticResource Win11TitleButton}" Click="MinimizeButton_Click" ToolTip="Küçült">
                         <Path Stroke="{StaticResource TxtSecond}" StrokeThickness="1.2"
                               Data="M 0,5 L 10,5" Width="10" Height="10"/>
                     </Button>
                     <!-- Maximize -->
-                    <Button Style="{StaticResource Win11TitleButton}" Click="MaximizeButton_Click" ToolTip="Büyüt">
+                    <Button x:Name="btnTitleMaximize" Style="{StaticResource Win11TitleButton}" Click="MaximizeButton_Click" ToolTip="Büyüt">
                         <Path Stroke="{StaticResource TxtSecond}" StrokeThickness="1.2"
                               Data="M 0,0 L 10,0 L 10,10 L 0,10 Z" Width="10" Height="10"/>
                     </Button>
                     <!-- Close / Hide to Tray -->
-                    <Button Style="{StaticResource Win11CloseButton}" Click="CloseButton_Click" ToolTip="Kapat (Tepside çalışır)">
+                    <Button x:Name="btnTitleClose" Style="{StaticResource Win11CloseButton}" Click="CloseButton_Click" ToolTip="Kapat (Tepside çalışır)">
                         <Path Stroke="{StaticResource TxtSecond}" StrokeThickness="1.2"
                               Data="M 0,0 L 9,9 M 0,9 L 9,0" Width="9" Height="9"/>
                     </Button>
@@ -569,7 +569,7 @@
                                 <TextBlock x:Name="lblPageHeader" Text="Otomatik Geçiş Profilleri"
                                            Foreground="{StaticResource TxtPrimary}"
                                            FontSize="22" FontWeight="Bold"/>
-                                <TextBlock Text="Oyun ve uygulamalara göre SteelSeries Sonar profillerini otomatik değiştirir."
+                                <TextBlock x:Name="lblProfilesDesc" Text="Oyun ve uygulamalara göre SteelSeries Sonar profillerini otomatik değiştirir."
                                            Foreground="{StaticResource TxtSecond}"
                                            FontSize="12" Margin="0,4,0,0"/>
                             </StackPanel>
@@ -591,7 +591,7 @@
                                         <TextBlock x:Name="lblDefaultConfig" Text="Varsayılan Profil:"
                                                    Foreground="{StaticResource TxtPrimary}"
                                                    FontWeight="Bold" FontSize="13.5"/>
-                                        <TextBlock Text="Hiçbir kural eşleşmediğinde veya masaüstündeyken kullanılır."
+                                        <TextBlock x:Name="lblDefaultEQDesc" Text="Hiçbir kural eşleşmediğinde veya masaüstündeyken kullanılır."
                                                    Foreground="{StaticResource TxtSecond}"
                                                    FontSize="11.5" Margin="0,3,0,0"/>
                                     </StackPanel>
@@ -622,7 +622,7 @@
                                         <TextBlock x:Name="lblPerApp" Text="UYGULAMA / OYUN"
                                                    Foreground="{StaticResource TxtSecond}"
                                                    FontSize="10" FontWeight="Bold"/>
-                                        <TextBlock Grid.Column="2" Text="HEDEF SONAR PROFİLİ"
+                                        <TextBlock x:Name="lblColPreset" Grid.Column="2" Text="HEDEF SONAR PROFİLİ"
                                                    Foreground="{StaticResource TxtSecond}"
                                                    FontSize="10" FontWeight="Bold"/>
                                     </Grid>
@@ -736,7 +736,7 @@
 
                             <StackPanel Grid.Row="2" Orientation="Horizontal"
                                         HorizontalAlignment="Right" Margin="0,14,0,0">
-                                <TextBlock Text="Gecikme (sn):" Foreground="{StaticResource TxtSecond}"
+                                <TextBlock x:Name="lblDeviceDelay" Text="Gecikme (sn):" Foreground="{StaticResource TxtSecond}"
                                            VerticalAlignment="Center" Margin="0,0,10,0"/>
                                 <TextBox x:Name="txtDeviceDelay" Width="60"
                                          HorizontalContentAlignment="Center"
@@ -765,7 +765,7 @@
                                 <TextBlock x:Name="lblGpuMonitorHeader" Text="GPU Monitör &amp; Otomatik Profil"
                                            Foreground="{StaticResource TxtPrimary}"
                                            FontSize="22" FontWeight="Bold"/>
-                                <TextBlock Text="NVIDIA GPU frekansını izler ve belirlenen limit aşıldığında Afterburner profilini tetikler."
+                                <TextBlock x:Name="lblGpuMonitorDesc" Text="NVIDIA GPU frekansını izler ve belirlenen limit aşıldığında Afterburner profilini tetikler."
                                            Foreground="{StaticResource TxtSecond}"
                                            FontSize="12" Margin="0,4,0,0"/>
                             </StackPanel>
@@ -918,7 +918,7 @@
                                 <TextBlock x:Name="lblSettingsHeader" Text="Ayarlar"
                                            Foreground="{StaticResource TxtPrimary}"
                                            FontSize="22" FontWeight="Bold"/>
-                                <TextBlock Text="Uygulama davranışını ve tercihlerini yapılandırın."
+                                <TextBlock x:Name="lblSettingsDesc" Text="Uygulama davranışını ve tercihlerini yapılandırın."
                                            Foreground="{StaticResource TxtSecond}"
                                            FontSize="12" Margin="0,4,0,0"/>
                             </StackPanel>
@@ -976,7 +976,7 @@
                                             <!-- Visible Profiles Selector -->
                                             <StackPanel x:Name="panelWidgetProfiles" Margin="0,10,0,0">
                                                 <Separator Background="{StaticResource Border}" Margin="0,0,0,8"/>
-                                                <TextBlock Text="Widget'ta Görünecek Profiller:" Foreground="{StaticResource TxtSecond}" FontSize="11" Margin="0,0,0,6"/>
+                                                <TextBlock x:Name="lblWidgetProfilesTitle" Text="Widget'ta Görünecek Profiller:" Foreground="{StaticResource TxtSecond}" FontSize="11" Margin="0,0,0,6"/>
                                                 <WrapPanel Orientation="Horizontal">
                                                     <CheckBox x:Name="chkWidgetProf1" Content="⚡ Performans" Margin="0,0,14,0" Checked="ChkWidgetProfile_Changed" Unchecked="ChkWidgetProfile_Changed"/>
                                                     <CheckBox x:Name="chkWidgetProf2" Content="🎮 Oyun" Margin="0,0,14,0" Checked="ChkWidgetProfile_Changed" Unchecked="ChkWidgetProfile_Changed"/>
@@ -1110,7 +1110,7 @@
                                                 <TextBlock Text="-45s" Foreground="{StaticResource TxtMuted}" FontSize="9" HorizontalAlignment="Left" Margin="100,0,0,0"/>
                                                 <TextBlock Text="-30s" Foreground="{StaticResource TxtMuted}" FontSize="9" HorizontalAlignment="Center"/>
                                                 <TextBlock Text="-15s" Foreground="{StaticResource TxtMuted}" FontSize="9" HorizontalAlignment="Right" Margin="0,0,100,0"/>
-                                                <TextBlock Text="Şimdi" Foreground="{StaticResource Accent}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Right"/>
+                                                <TextBlock x:Name="lblChartNow" Text="Şimdi" Foreground="{StaticResource Accent}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Right"/>
                                             </Grid>
                                         </StackPanel>
                                     </Border>

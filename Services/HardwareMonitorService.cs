@@ -11,6 +11,7 @@ namespace Warden
     {
         public string Id { get; set; } = "";
         public string Name { get; set; } = "";
+        public string RawName { get; set; } = "";       // LibreHardwareMonitor'daki orijinal sensör adı
         public string Category { get; set; } = ""; // CPU, GPU, Fans, Motherboard, Memory
         public string HardwareName { get; set; } = "";
         public SensorType SensorType { get; set; }
@@ -29,6 +30,31 @@ namespace Warden
             {
                 History.RemoveAt(0);
             }
+        }
+
+        /// <summary>
+        /// UI'ya gönderilecek bağımsız kopya. Arka plan thread'i History'yi değiştirirken UI thread'i
+        /// aynı listeyi grafikte gezerse "Collection was modified" hatası oluşuyordu.
+        /// </summary>
+        public TelemetrySensorItem Clone()
+        {
+            var copy = new TelemetrySensorItem
+            {
+                Id = Id,
+                Name = Name,
+                RawName = RawName,
+                Category = Category,
+                HardwareName = HardwareName,
+                SensorType = SensorType,
+                Value = Value,
+                FormattedValue = FormattedValue,
+                Unit = Unit,
+                IsFavorite = IsFavorite,
+                IsOnGraph = IsOnGraph,
+                GraphColor = GraphColor
+            };
+            copy.History.AddRange(History);
+            return copy;
         }
     }
 
@@ -66,6 +92,8 @@ namespace Warden
 
         public event EventHandler<TelemetrySnapshot>? TelemetryUpdated;
 
+        private static readonly object LogLock = new();
+
         private static void LogTelemetry(string message)
         {
             try
@@ -73,7 +101,18 @@ namespace Warden
                 string logDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Warden", "logs");
                 System.IO.Directory.CreateDirectory(logDir);
                 string logPath = System.IO.Path.Combine(logDir, "telemetry.log");
-                System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+                lock (LogLock)
+                {
+                    // Her açılışta sensör dökümü eklendiği için dosya sınırsız büyüyordu → 1 MB'ta döndür
+                    var fi = new System.IO.FileInfo(logPath);
+                    if (fi.Exists && fi.Length > 1024 * 1024)
+                    {
+                        string bak = logPath + ".bak";
+                        if (System.IO.File.Exists(bak)) System.IO.File.Delete(bak);
+                        System.IO.File.Move(logPath, bak);
+                    }
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+                }
             }
             catch { }
         }
@@ -81,6 +120,11 @@ namespace Warden
         private bool _loggedFirstRun = false;
 
         private bool _isInitializingComputer = false;
+        private bool _disposed = false;
+
+        // Kullanıcının kayıtlı grafik sensörü yoksa CPU/GPU sıcaklığı yalnızca bir kez varsayılan olarak eklenir.
+        // (Eskiden her tick'te kontrol ediliyordu; kullanıcı grafikteki tüm sensörleri kaldıramıyordu.)
+        private bool _applyDefaultGraph = false;
 
         public void Initialize(List<string> favorites, List<string> graphSensors)
         {
@@ -91,6 +135,7 @@ namespace Warden
 
                 _graphIds.Clear();
                 foreach (var g in graphSensors) _graphIds.Add(g);
+                _applyDefaultGraph = _graphIds.Count == 0;
 
                 if (_computer == null && !_isInitializingComputer)
                 {
@@ -112,13 +157,18 @@ namespace Warden
                             comp.Open();
                             lock (_lock)
                             {
+                                if (_disposed)
+                                {
+                                    comp.Close();
+                                    return;
+                                }
                                 _computer = comp;
                                 _isInitialized = true;
                             }
                             LogTelemetry("LibreHardwareMonitor Computer opened successfully in background.");
 
                             UpdateSensorsInternal();
-                            LogTelemetry($"Initial scan completed. Total sensors captured: {_sensors.Count}");
+                            LogTelemetry($"Initial scan completed. Total sensors captured: {SensorCount}");
                         }
                         catch (Exception ex)
                         {
@@ -133,10 +183,13 @@ namespace Warden
             }
         }
 
+        private int SensorCount { get { lock (_lock) return _sensors.Count; } }
+
         public void Start(int intervalMs = 1000)
         {
             lock (_lock)
             {
+                if (_disposed) return;
                 _timer?.Dispose();
                 _timer = new System.Threading.Timer(async _ => await TickAsync(), null, 0, intervalMs);
             }
@@ -153,9 +206,9 @@ namespace Warden
 
         public bool ToggleFavorite(string sensorId)
         {
+            bool isFav;
             lock (_lock)
             {
-                bool isFav;
                 if (_favoriteIds.Contains(sensorId))
                 {
                     _favoriteIds.Remove(sensorId);
@@ -171,17 +224,18 @@ namespace Warden
                 {
                     item.IsFavorite = isFav;
                 }
-
-                NotifySnapshot();
-                return isFav;
             }
+
+            NotifySnapshot();
+            return isFav;
         }
 
         public bool ToggleGraph(string sensorId)
         {
+            bool isOnGraph;
             lock (_lock)
             {
-                bool isOnGraph;
+                _applyDefaultGraph = false;
                 if (_graphIds.Contains(sensorId))
                 {
                     _graphIds.Remove(sensorId);
@@ -199,9 +253,10 @@ namespace Warden
                 }
 
                 AssignGraphColors();
-                NotifySnapshot();
-                return isOnGraph;
             }
+
+            NotifySnapshot();
+            return isOnGraph;
         }
 
         public List<string> GetFavoriteIds()
@@ -236,10 +291,10 @@ namespace Warden
 
         private void UpdateSensorsInternal()
         {
-            if (_computer == null || !_isInitialized) return;
-
             lock (_lock)
             {
+                if (_computer == null || !_isInitialized || _disposed) return;
+
                 try
                 {
                     if (!_loggedFirstRun)
@@ -279,14 +334,15 @@ namespace Warden
                         }
                     }
 
-                    // Eğer kullanıcı hiç grafik sensörü seçmediyse ilk seferde CPU ve GPU sıcaklıklarını varsayılan yap
-                    if (_graphIds.Count == 0 && _sensors.Count > 0)
+                    // Eğer kullanıcının kayıtlı grafik sensörü yoksa, ilk seferde CPU ve GPU sıcaklıklarını varsayılan yap
+                    if (_applyDefaultGraph && _graphIds.Count == 0 && _sensors.Count > 0)
                     {
                         var defaultCpu = _sensors.Values.FirstOrDefault(s => s.Category == "CPU" && s.SensorType == SensorType.Temperature);
                         var defaultGpu = _sensors.Values.FirstOrDefault(s => s.Category == "GPU" && s.SensorType == SensorType.Temperature);
 
-                        if (defaultCpu != null) _graphIds.Add(defaultCpu.Id);
-                        if (defaultGpu != null) _graphIds.Add(defaultGpu.Id);
+                        if (defaultCpu != null) { _graphIds.Add(defaultCpu.Id); defaultCpu.IsOnGraph = true; }
+                        if (defaultGpu != null) { _graphIds.Add(defaultGpu.Id); defaultGpu.IsOnGraph = true; }
+                        _applyDefaultGraph = false;
                     }
 
                     AssignGraphColors();
@@ -320,6 +376,7 @@ namespace Warden
                     {
                         Id = id,
                         Name = displayName,
+                        RawName = sensor.Name,
                         Category = targetCategory,
                         HardwareName = hardwareName,
                         SensorType = sensor.SensorType,
@@ -341,10 +398,15 @@ namespace Warden
             }
         }
 
+        /// <summary>Kendisi dışında, verilen kategori ve tipte zaten listelenen bir sensör var mı?</summary>
+        private bool HasOtherSensor(string category, SensorType type, string ownId)
+            => _sensors.Values.Any(s => s.Category == category && s.SensorType == type && s.Id != ownId);
+
         private bool ShouldIncludeSensor(ISensor sensor, string category, out string displayName, out string targetCategory)
         {
             displayName = sensor.Name;
             targetCategory = category;
+            string ownId = sensor.Identifier.ToString();
 
             if (category == "GPU")
             {
@@ -354,13 +416,13 @@ namespace Warden
                         sensor.Name.Equals("GPU", StringComparison.OrdinalIgnoreCase) ||
                         sensor.Name.Equals("GPU Temperature", StringComparison.OrdinalIgnoreCase))
                     {
-                        displayName = "GPU Sıcaklığı";
+                        displayName = Loc.Get("SensorGpuTemp");
                         return true;
                     }
                     if (sensor.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase) ||
                         sensor.Name.Contains("Hotspot", StringComparison.OrdinalIgnoreCase))
                     {
-                        displayName = "GPU Hot Spot Sıcaklığı";
+                        displayName = Loc.Get("SensorGpuHotSpot");
                         return true;
                     }
                 }
@@ -372,10 +434,10 @@ namespace Warden
                         sensor.Name.Equals("GPU Power", StringComparison.OrdinalIgnoreCase) ||
                         sensor.Name.Equals("GPU", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (_sensors.Values.Any(s => s.Category == "GPU" && s.SensorType == SensorType.Power && s.Id != sensor.Identifier.ToString()))
+                        if (HasOtherSensor("GPU", SensorType.Power, ownId))
                             return false;
 
-                        displayName = "GPU Güç Tüketimi (Watt)";
+                        displayName = Loc.Get("SensorGpuPower");
                         return true;
                     }
                 }
@@ -383,12 +445,12 @@ namespace Warden
                 {
                     if (sensor.Name.Equals("GPU Core", StringComparison.OrdinalIgnoreCase))
                     {
-                        displayName = "GPU Çekirdek Hızı (MHz)";
+                        displayName = Loc.Get("SensorGpuCoreClock");
                         return true;
                     }
                     if (sensor.Name.Equals("GPU Memory", StringComparison.OrdinalIgnoreCase))
                     {
-                        displayName = "GPU Bellek Hızı (MHz)";
+                        displayName = Loc.Get("SensorGpuMemClock");
                         return true;
                     }
                 }
@@ -397,7 +459,7 @@ namespace Warden
                     if (sensor.Name.Equals("GPU Core", StringComparison.OrdinalIgnoreCase) ||
                         sensor.Name.Equals("GPU", StringComparison.OrdinalIgnoreCase))
                     {
-                        displayName = "GPU Kullanımı (%)";
+                        displayName = Loc.Get("SensorGpuLoad");
                         return true;
                     }
                 }
@@ -421,26 +483,35 @@ namespace Warden
             {
                 if (sensor.SensorType == SensorType.Temperature)
                 {
-                    if (sensor.Name.Equals("CPU Package", StringComparison.OrdinalIgnoreCase) ||
-                        sensor.Name.Equals("Package", StringComparison.OrdinalIgnoreCase))
+                    bool isPrimary =
+                        sensor.Name.Equals("CPU Package", StringComparison.OrdinalIgnoreCase) ||
+                        sensor.Name.Equals("Package", StringComparison.OrdinalIgnoreCase) ||
+                        sensor.Name.Contains("Tctl/Tdie", StringComparison.OrdinalIgnoreCase);
+                    bool isFallback =
+                        sensor.Name.Equals("CPU Core", StringComparison.OrdinalIgnoreCase) ||
+                        sensor.Name.Equals("Core Average", StringComparison.OrdinalIgnoreCase);
+
+                    if (isPrimary || isFallback)
                     {
-                        displayName = "CPU Paket Sıcaklığı";
-                        return true;
-                    }
-                    if (sensor.Name.Equals("Core (Tctl/Tdie)", StringComparison.OrdinalIgnoreCase) ||
-                        sensor.Name.Contains("Tctl/Tdie", StringComparison.OrdinalIgnoreCase))
-                    {
-                        displayName = "CPU Paket Sıcaklığı";
-                        return true;
-                    }
-                    if (sensor.Name.Equals("CPU Core", StringComparison.OrdinalIgnoreCase) ||
-                        sensor.Name.Equals("Core Average", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!_sensors.Values.Any(s => s.Category == "CPU" && s.SensorType == SensorType.Temperature))
+                        var other = _sensors.Values.FirstOrDefault(s =>
+                            s.Category == "CPU" && s.SensorType == SensorType.Temperature && s.Id != ownId);
+
+                        if (other != null)
                         {
-                            displayName = "CPU Paket Sıcaklığı";
-                            return true;
+                            // Birincil (Package/Tctl) sensör, yedek (Core Average) olanın yerini alır;
+                            // aksi halde aynı adla iki "CPU Paket Sıcaklığı" satırı oluşmaz.
+                            bool otherIsPrimary =
+                                other.RawName.Equals("CPU Package", StringComparison.OrdinalIgnoreCase) ||
+                                other.RawName.Equals("Package", StringComparison.OrdinalIgnoreCase) ||
+                                other.RawName.Contains("Tctl/Tdie", StringComparison.OrdinalIgnoreCase);
+                            if (isPrimary && !otherIsPrimary)
+                                _sensors.Remove(other.Id);
+                            else
+                                return false;
                         }
+
+                        displayName = Loc.Get("SensorCpuTemp");
+                        return true;
                     }
                 }
                 else if (sensor.SensorType == SensorType.Power)
@@ -451,10 +522,11 @@ namespace Warden
                         sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase) ||
                         sensor.Name.Equals("CPU", StringComparison.OrdinalIgnoreCase))
                     {
-                        var existingPower = _sensors.Values.FirstOrDefault(s => s.Category == "CPU" && s.SensorType == SensorType.Power && s.Id != sensor.Identifier.ToString());
+                        var existingPower = _sensors.Values.FirstOrDefault(s => s.Category == "CPU" && s.SensorType == SensorType.Power && s.Id != ownId);
                         if (existingPower != null)
                         {
-                            if (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) && !existingPower.HardwareName.Contains("Package", StringComparison.OrdinalIgnoreCase))
+                            // Not: eskiden HardwareName (işlemci adı) kontrol ediliyordu; doğru olan mevcut sensörün adıdır
+                            if (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) && !existingPower.RawName.Contains("Package", StringComparison.OrdinalIgnoreCase))
                             {
                                 _sensors.Remove(existingPower.Id);
                             }
@@ -464,7 +536,7 @@ namespace Warden
                             }
                         }
 
-                        displayName = "CPU Güç Tüketimi (Watt)";
+                        displayName = Loc.Get("SensorCpuPower");
                         return true;
                     }
                 }
@@ -472,13 +544,13 @@ namespace Warden
                 {
                     if (sensor.Name.Equals("Core Max", StringComparison.OrdinalIgnoreCase))
                     {
-                        var existingClock = _sensors.Values.FirstOrDefault(s => s.Category == "CPU" && s.SensorType == SensorType.Clock && s.Id != sensor.Identifier.ToString());
+                        var existingClock = _sensors.Values.FirstOrDefault(s => s.Category == "CPU" && s.SensorType == SensorType.Clock && s.Id != ownId);
                         if (existingClock != null)
                         {
                             _sensors.Remove(existingClock.Id);
                         }
 
-                        displayName = "CPU Saat Hızı (MHz)";
+                        displayName = Loc.Get("SensorCpuClock");
                         return true;
                     }
 
@@ -487,10 +559,10 @@ namespace Warden
                         sensor.Name.Equals("Core #1", StringComparison.OrdinalIgnoreCase) ||
                         sensor.Name.Equals("Core Average", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (_sensors.Values.Any(s => s.Category == "CPU" && s.SensorType == SensorType.Clock && s.Id != sensor.Identifier.ToString()))
+                        if (HasOtherSensor("CPU", SensorType.Clock, ownId))
                             return false;
 
-                        displayName = "CPU Saat Hızı (MHz)";
+                        displayName = Loc.Get("SensorCpuClock");
                         return true;
                     }
                 }
@@ -499,7 +571,7 @@ namespace Warden
                     if (sensor.Name.Equals("CPU Total", StringComparison.OrdinalIgnoreCase) ||
                         sensor.Name.Equals("Total", StringComparison.OrdinalIgnoreCase))
                     {
-                        displayName = "CPU Toplam Kullanım (%)";
+                        displayName = Loc.Get("SensorCpuLoad");
                         return true;
                     }
                 }
@@ -523,20 +595,22 @@ namespace Warden
                 {
                     if (sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Check if CPU hardware already provided a temperature
-                        if (!_sensors.Values.Any(s => s.Category == "CPU" && s.SensorType == SensorType.Temperature))
+                        // Check if CPU hardware already provided a temperature.
+                        // Kendi kaydı hariç tutulur; aksi halde sonraki tick'te kendini "başka sensör" sanıp
+                        // CPU ↔ Anakart kategorileri arasında her saniye gidip geliyordu.
+                        if (!HasOtherSensor("CPU", SensorType.Temperature, ownId))
                         {
                             targetCategory = "CPU";
-                            displayName = "CPU Paket Sıcaklığı";
+                            displayName = Loc.Get("SensorCpuTemp");
                             return true;
                         }
                     }
 
                     displayName = sensor.Name switch
                     {
-                        "System" => "Sistem Sıcaklığı",
-                        "Chipset" => "Yonga Seti (Chipset)",
-                        "VRM MOS" => "VRM MOS Sıcaklığı",
+                        "System" => Loc.Get("SensorSystemTemp"),
+                        "Chipset" => Loc.Get("SensorChipset"),
+                        "VRM MOS" => Loc.Get("SensorVrm"),
                         _ => sensor.Name
                     };
                     return true;
@@ -554,12 +628,12 @@ namespace Warden
             {
                 if (sensor.SensorType == SensorType.Load && sensor.Name.Equals("Memory", StringComparison.OrdinalIgnoreCase))
                 {
-                    displayName = "Bellek Kullanımı (%)";
+                    displayName = Loc.Get("SensorMemLoad");
                     return true;
                 }
                 if (sensor.SensorType == SensorType.Data && sensor.Name.Equals("Memory Used", StringComparison.OrdinalIgnoreCase))
                 {
-                    displayName = "Kullanılan Bellek";
+                    displayName = Loc.Get("SensorMemUsed");
                     return true;
                 }
                 return false;
@@ -626,9 +700,10 @@ namespace Warden
 
         private void NotifySnapshot()
         {
+            TelemetrySnapshot snapshot;
             lock (_lock)
             {
-                var all = _sensors.Values.ToList();
+                var all = _sensors.Values.Select(s => s.Clone()).ToList();
                 var favs = all.Where(s => s.IsFavorite).ToList();
                 var graphs = all.Where(s => s.IsOnGraph).ToList();
 
@@ -641,27 +716,34 @@ namespace Warden
                     { "Memory", all.Where(s => s.Category == "Memory").ToList() }
                 };
 
-                var snapshot = new TelemetrySnapshot
+                snapshot = new TelemetrySnapshot
                 {
                     Favorites = favs,
                     GraphSensors = graphs,
                     Categories = cats,
                     AllSensors = all
                 };
-
-                TelemetryUpdated?.Invoke(this, snapshot);
             }
+
+            // Olay kilit dışında tetiklenir: abone senkron Dispatcher.Invoke yaparsa kilitlenme (deadlock) olmaz
+            TelemetryUpdated?.Invoke(this, snapshot);
         }
 
         public void Dispose()
         {
             Stop();
-            try
+            lock (_lock)
             {
-                _computer?.Close();
+                // Kilit altında kapatılır: devam eden bir tick'in kapatılmış Computer'a erişmesi önlenir
+                _disposed = true;
+                try
+                {
+                    _computer?.Close();
+                }
+                catch { }
                 _computer = null;
+                _isInitialized = false;
             }
-            catch { }
         }
     }
 }

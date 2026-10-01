@@ -21,7 +21,11 @@ namespace Warden
         private readonly Application _app;
         private SonarWatcher? _watcher;
         private MainWindow? _mainWindow;
-        private string _configPath = "config.json";
+        private readonly string _appDataFolder;
+        private readonly string _configPath;
+        private readonly string _logPath;
+        private readonly object _logLock = new();
+        private readonly object _configFileLock = new();
         
         // GPU Monitor
         private GpuMonitor? _gpuMonitor;
@@ -37,25 +41,25 @@ namespace Warden
 
         public AppConfig Config { get; private set; } = new();
 
-        private string GetAppDataFolder()
+        private static string CreateAppDataFolder()
         {
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             string folder = Path.Combine(appData, "Warden");
-            if (!Directory.Exists(folder))
-            {
-                Directory.CreateDirectory(folder);
-            }
-            string logsFolder = Path.Combine(folder, "logs");
-            if (!Directory.Exists(logsFolder))
-            {
-                Directory.CreateDirectory(logsFolder);
-            }
+            Directory.CreateDirectory(Path.Combine(folder, "logs")); // Var olan klasörde no-op
             return folder;
         }
 
         public TrayApplicationContext(Application app)
         {
             _app = app;
+
+            // Config her zaman %AppData%\Warden altında tutulur. Eskiden önce çalışma dizinindeki
+            // "config.json" deneniyordu; Görev Zamanlayıcı ile açılışta (System32) ve elle açılışta (exe klasörü)
+            // farklı config dosyaları kullanılabiliyordu.
+            _appDataFolder = CreateAppDataFolder();
+            _configPath = Path.Combine(_appDataFolder, "config.json");
+            _logPath = Path.Combine(_appDataFolder, "logs", "service.log");
+
             _client = new SteelSeriesClient();
 
             _trayIcon = new NotifyIcon
@@ -70,17 +74,26 @@ namespace Warden
                     ShowMainWindow();
             };
 
-            // 2. Context Menu
+            // 2. Context Menu (metinler her açılışta seçili dile göre yenilenir)
             var contextMenu = new ContextMenuStrip();
-            contextMenu.Items.Add("Open Settings", null, (s, e) => ShowMainWindow());
-            var widgetMenuItem = new ToolStripMenuItem("Masaüstü Widget'ı", null, (s, e) => ToggleDesktopWidget());
+            var openMenuItem     = new ToolStripMenuItem("", null, (s, e) => ShowMainWindow());
+            var widgetMenuItem   = new ToolStripMenuItem("", null, (s, e) => ToggleDesktopWidget());
+            var reloadMenuItem   = new ToolStripMenuItem("", null, (s, e) => ReloadConfigFromDisk());
+            var discoverMenuItem = new ToolStripMenuItem("", null, async (s, e) => await DiscoverFromTray());
+            var exitMenuItem     = new ToolStripMenuItem("", null, (s, e) => Exit());
+            contextMenu.Items.Add(openMenuItem);
             contextMenu.Items.Add(widgetMenuItem);
-            contextMenu.Items.Add("Reload Config", null, (s, e) => LoadConfigAndStart());
-            contextMenu.Items.Add("Discover Presets", null, async (s, e) => await DiscoverFromTray());
+            contextMenu.Items.Add(reloadMenuItem);
+            contextMenu.Items.Add(discoverMenuItem);
             contextMenu.Items.Add(new ToolStripSeparator());
-            contextMenu.Items.Add("Exit", null, (s, e) => Exit());
+            contextMenu.Items.Add(exitMenuItem);
             contextMenu.Opening += (s, e) =>
             {
+                openMenuItem.Text     = Loc.Get("TrayOpen");
+                widgetMenuItem.Text   = Loc.Get("TrayWidget");
+                reloadMenuItem.Text   = Loc.Get("TrayReload");
+                discoverMenuItem.Text = Loc.Get("TrayDiscover");
+                exitMenuItem.Text     = Loc.Get("TrayExit");
                 widgetMenuItem.Checked = Config.DesktopWidgetEnabled;
             };
             _trayIcon.ContextMenuStrip = contextMenu;
@@ -127,20 +140,52 @@ namespace Warden
             return System.Drawing.SystemIcons.Application;
         }
 
+        /// <summary>
+        /// Bellekteki Config değişikliklerini (UI'dan) çalışan servislere uygular. Diskten okumaz.
+        /// </summary>
         public void ReloadConfig()
         {
-            // Interval değiştiyse veya watcher hiç oluşturulmadıysa → tam restart
+            Config.CheckIntervalMilliseconds = Math.Clamp(Config.CheckIntervalMilliseconds,
+                AppConfig.MinCheckIntervalMs, AppConfig.MaxCheckIntervalMs);
+            Loc.CurrentLang = Config.Language;
+            ApplyStartupIfChanged();
+
+            // Interval değiştiyse veya watcher hiç oluşturulmadıysa → watcher'ı yeniden oluştur
             if (_watcher == null || Config.CheckIntervalMilliseconds != _lastIntervalMs)
             {
-                LoadConfigAndStart();
+                StartWatcher();
                 return;
             }
 
-            // Sadece kural/preset/dil değiştiyse → watcher'ı durdurmadan hot-update
-            Loc.CurrentLang = Config.Language;
-            SetStartup(Config.StartWithWindows);
+            // Sadece kural/preset değiştiyse → watcher'ı durdurmadan hot-update.
+            // (Eskiden her ayar değişiminde schtasks.exe 3-4 kez senkron çalıştırılıyor ve
+            //  cihaz denetim zamanlayıcısı sıfırlanıyordu; artık gerek yok.)
             _watcher.UpdateConfig(Config.DefaultPresetId, Config.Rules);
-            StartDeviceEnforcement();
+        }
+
+        /// <summary>Tray menüsündeki "Reload Config": config.json'ı diskten yeniden okur.</summary>
+        private void ReloadConfigFromDisk()
+        {
+            LoadConfigAndStart();
+            _mainWindow?.ReloadFromConfig();
+        }
+
+        private void StartWatcher()
+        {
+            _watcher?.Stop();
+            _watcher = new SonarWatcher(
+                _client,
+                Config.CheckIntervalMilliseconds,
+                Config.DefaultPresetId,
+                Config.Rules,
+                OnPresetChanged,
+                OnActiveWindowChanged,
+                Log,
+                OnConnectionLost,
+                OnConnectionRestored
+            );
+            _watcher.Start();
+            _lastIntervalMs = Config.CheckIntervalMilliseconds;
         }
 
         private readonly object _windowLock = new();
@@ -212,82 +257,18 @@ namespace Warden
         {
             try
             {
-                _watcher?.Stop();
                 Log("Loading configuration...");
 
-                if (!File.Exists(_configPath))
-                {
-                    _configPath = Path.Combine(GetAppDataFolder(), "config.json");
-                    string oldPCWardenPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PCWarden", "config.json");
-                    string oldSonarPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SonarEQChanger", "config.json");
-                    string oldConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
-                    if (!File.Exists(_configPath))
-                    {
-                        if (File.Exists(oldPCWardenPath))
-                        {
-                            try
-                            {
-                                File.Copy(oldPCWardenPath, _configPath);
-                                Log("Migrated config.json from PCWarden.");
-                            }
-                            catch { }
-                        }
-                        else if (File.Exists(oldSonarPath))
-                        {
-                            try
-                            {
-                                File.Copy(oldSonarPath, _configPath);
-                                Log("Migrated config.json from SonarEQChanger.");
-                            }
-                            catch { }
-                        }
-                        else if (File.Exists(oldConfigPath))
-                        {
-                            try
-                            {
-                                File.Copy(oldConfigPath, _configPath);
-                                Log("Migrated old config.json to AppData folder.");
-                            }
-                            catch { }
-                        }
-                    }
-                }
-
-                if (!File.Exists(_configPath))
-                {
-                    Config = new AppConfig
-                    {
-                        DefaultPresetId = "CHANGE_ME_TO_DEFAULT_DESKTOP_PRESET_UUID",
-                        Rules = { { "VALORANT-Win64-Shipping.exe", "CHANGE_ME" } }
-                    };
-                    SaveConfig();
-                    Log($"Default config.json created at: {_configPath}");
-                }
-                else
-                {
-                    string configJson = File.ReadAllText(_configPath);
-                    Config = JsonSerializer.Deserialize<AppConfig>(configJson) ?? new AppConfig();
-                }
+                MigrateLegacyConfig();
+                Config = ReadConfigFromDisk();
 
                 // Apply Localization
                 Loc.CurrentLang = Config.Language;
 
-                // Apply Startup Registry
-                SetStartup(Config.StartWithWindows);
+                // Apply Startup Registry / Task (arka planda, yalnızca gerekirse)
+                ApplyStartupIfChanged();
 
-                _watcher = new SonarWatcher(
-                    _client,
-                    Config.CheckIntervalMilliseconds,
-                    Config.DefaultPresetId,
-                    Config.Rules,
-                    OnPresetChanged,
-                    OnActiveWindowChanged,
-                    Log,
-                    OnConnectionLost,
-                    OnConnectionRestored
-                );
-                _watcher.Start();
-                _lastIntervalMs = Config.CheckIntervalMilliseconds;
+                StartWatcher();
 
                 // Start GPU Monitor
                 if (_gpuMonitor == null)
@@ -311,7 +292,74 @@ namespace Warden
             }
             catch (Exception ex)
             {
+                Log($"Error loading config: {ex}");
                 MessageBox.Show($"Error loading config: {ex.Message}", "Warden Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>Eski sürümlerin config dosyalarını (ilk açılışta) AppData'ya taşır.</summary>
+        private void MigrateLegacyConfig()
+        {
+            if (File.Exists(_configPath)) return;
+
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var candidates = new (string Path, string Label)[]
+            {
+                (Path.Combine(appData, "PCWarden", "config.json"), "PCWarden"),
+                (Path.Combine(appData, "SonarEQChanger", "config.json"), "SonarEQChanger"),
+                (Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json"), "application folder"),
+                (Path.Combine(Environment.CurrentDirectory, "config.json"), "working directory")
+            };
+
+            foreach (var (path, label) in candidates)
+            {
+                try
+                {
+                    if (!File.Exists(path)) continue;
+                    File.Copy(path, _configPath);
+                    Log($"Migrated config.json from {label}: {path}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Log($"Config migration from {label} failed: {ex.Message}");
+                }
+            }
+        }
+
+        private AppConfig ReadConfigFromDisk()
+        {
+            if (!File.Exists(_configPath))
+            {
+                // Yer tutucu ("CHANGE_ME") preset/kural yazılmaz: bunlar GG'ye geçersiz istek gönderip
+                // gereksiz hata/bağlantı uyarısı üretiyordu. Kullanıcı arayüzden seçer.
+                var fresh = new AppConfig();
+                fresh.Normalize();
+                Config = fresh;
+                SaveConfig();
+                Log($"Default config.json created at: {_configPath}");
+                return fresh;
+            }
+
+            try
+            {
+                string configJson;
+                lock (_configFileLock) configJson = File.ReadAllText(_configPath);
+                var cfg = JsonSerializer.Deserialize<AppConfig>(configJson) ?? new AppConfig();
+                cfg.Normalize();
+                return cfg;
+            }
+            catch (JsonException ex)
+            {
+                // Bozuk JSON: uygulamayı çalışmaz bırakmak yerine yedekle ve varsayılanla devam et
+                string backup = _configPath + $".corrupt-{DateTime.Now:yyyyMMdd-HHmmss}";
+                try { File.Copy(_configPath, backup, overwrite: true); } catch { }
+                Log($"config.json is corrupt ({ex.Message}). Backup: {backup}. Loading defaults.");
+                ShowBalloon(4000, Loc.Get("ConfigCorrupt"), ToolTipIcon.Warning);
+
+                var fresh = new AppConfig();
+                fresh.Normalize();
+                return fresh;
             }
         }
 
@@ -331,13 +379,21 @@ namespace Warden
                 try
                 {
                     var ts = GetThrottleStopService();
+                    // "Reload Config" sonrası Config nesnesi değişir; widget eski nesneyi tutmasın diye yeniden oluşturulur
+                    if (_desktopWidget != null && !_desktopWidget.UsesConfig(Config))
+                    {
+                        _desktopWidget.CloseForReal();
+                        _desktopWidget = null;
+                    }
+
                     if (_desktopWidget == null)
                     {
                         _desktopWidget = new DesktopWidgetWindow(
                             ts,
                             Config,
                             () => SaveConfig(),
-                            () => ShowMainWindow()
+                            () => ShowMainWindow(),
+                            () => _mainWindow?.SyncDesktopWidgetState()
                         );
                     }
                     else
@@ -352,6 +408,11 @@ namespace Warden
                     Log($"[WIDGET ERROR] Failed to show widget: {ex.Message}");
                 }
             });
+        }
+
+        public void ApplyLanguageToWidget()
+        {
+            _app.Dispatcher.Invoke(() => _desktopWidget?.ApplyLanguage());
         }
 
         public void UpdateDesktopWidgetProfiles()
@@ -378,6 +439,9 @@ namespace Warden
                 ShowDesktopWidget();
             else
                 HideDesktopWidget();
+
+            // Ayarlar sayfasındaki onay kutusu tepsi menüsüyle senkron kalsın
+            _mainWindow?.SyncDesktopWidgetState();
         }
 
         private System.Threading.Timer? _deviceEnforceTimer;
@@ -392,9 +456,13 @@ namespace Warden
             {
                 try
                 {
-                    if (Config.DisabledDevices.Count > 0 || Config.DisabledDeviceNames.Count > 0)
+                    // UI thread listeleri değiştirebilir → arka planda gezmeden önce kopyala
+                    var cfg = Config;
+                    var ids = cfg.DisabledDevices.ToList();
+                    var names = cfg.DisabledDeviceNames.ToList();
+                    if (ids.Count > 0 || names.Count > 0)
                     {
-                        AudioDeviceEnforcer.EnforceDisabledDevices(Config.DisabledDevices, Config.DisabledDeviceNames);
+                        AudioDeviceEnforcer.EnforceDisabledDevices(ids, names);
                     }
                 }
                 catch { }
@@ -402,26 +470,84 @@ namespace Warden
         }
 
         private bool? _lastStartupState = null;
+        private bool _legacyStartupCleaned = false;
+        private readonly object _startupLock = new();     // yalnızca _lastStartupState için (kısa süreli)
+        private readonly object _startupRunLock = new();  // schtasks çalıştırmalarını sıraya koyar (arka planda)
 
         public void SaveConfig()
         {
             try
             {
                 string json = JsonSerializer.Serialize(Config, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_configPath, json);
-                
+
+                // Atomik yazma: önce geçici dosyaya yaz, sonra değiştir. Yazma sırasında çökme/elektrik kesintisi
+                // olursa config.json yarım kalıp bozulmaz.
+                lock (_configFileLock)
+                {
+                    string tmp = _configPath + ".tmp";
+                    File.WriteAllText(tmp, json);
+                    File.Move(tmp, _configPath, overwrite: true);
+                }
+
                 // Reapply settings that might have changed
                 Loc.CurrentLang = Config.Language;
-                if (_lastStartupState == null || _lastStartupState != Config.StartWithWindows)
-                {
-                    _lastStartupState = Config.StartWithWindows;
-                    SetStartup(Config.StartWithWindows);
-                }
+                ApplyStartupIfChanged();
             }
             catch (Exception ex)
             {
                 Log($"Failed to save config: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Başlangıç görevi yalnızca ayar değiştiğinde (veya ilk açılışta) güncellenir ve schtasks.exe
+        /// arka planda çalıştırılır; UI thread'i bloklanmaz.
+        /// </summary>
+        private void ApplyStartupIfChanged()
+        {
+            bool enable = Config.StartWithWindows;
+            lock (_startupLock)
+            {
+                if (_lastStartupState == enable) return;
+                _lastStartupState = enable;
+            }
+
+            Task.Run(() =>
+            {
+                lock (_startupRunLock)
+                {
+                    // Arada ayar tekrar değiştiyse eski isteği uygulama
+                    bool? latest;
+                    lock (_startupLock) latest = _lastStartupState;
+                    if (latest != enable) return;
+                    SetStartup(enable);
+                }
+            });
+        }
+
+        private static void RunSchtasks(string args)
+        {
+            using var proc = Process.Start(new ProcessStartInfo("schtasks.exe", args)
+            {
+                UseShellExecute = false,
+                CreateNoWindow  = true
+            });
+            if (proc != null && !proc.WaitForExit(10000))
+            {
+                try { proc.Kill(); } catch { }
+            }
+        }
+
+        private static void DeleteRunKeyValue(string name)
+        {
+            try
+            {
+                using var regKey = Microsoft.Win32.Registry.CurrentUser
+                    .OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+                if (regKey?.GetValue(name) != null)
+                    regKey.DeleteValue(name);
+            }
+            catch { }
         }
 
         private void SetStartup(bool enable)
@@ -431,71 +557,38 @@ namespace Warden
             try
             {
                 const string taskName = "Warden";
-                string[] oldTasks = { "PCWarden", "SonarEQChanger" };
 
-                // Eski task ve registry anahtarlarını temizle
-                foreach (var oldTask in oldTasks)
+                // Eski task ve registry anahtarlarını temizle (oturum başına bir kez yeterli)
+                if (!_legacyStartupCleaned)
                 {
-                    try
+                    _legacyStartupCleaned = true;
+                    foreach (var oldTask in new[] { "PCWarden", "SonarEQChanger" })
                     {
-                        Process.Start(new ProcessStartInfo("schtasks.exe", $"/delete /tn \"{oldTask}\" /f")
-                        {
-                            UseShellExecute = false,
-                            CreateNoWindow  = true
-                        })?.WaitForExit();
-
-                        using var regKeyOld = Microsoft.Win32.Registry.CurrentUser
-                            .OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                        if (regKeyOld?.GetValue(oldTask) != null)
-                            regKeyOld.DeleteValue(oldTask);
+                        try { RunSchtasks($"/delete /tn \"{oldTask}\" /f"); } catch { }
+                        DeleteRunKeyValue(oldTask);
                     }
-                    catch { }
                 }
 
                 if (enable)
                 {
-                    string exePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+                    string exePath = Environment.ProcessPath ?? "";
                     if (string.IsNullOrEmpty(exePath)) return;
 
                     // Eski Registry kaydını temizle
-                    try
-                    {
-                        using var regKey = Microsoft.Win32.Registry.CurrentUser
-                            .OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                        if (regKey?.GetValue(taskName) != null)
-                            regKey.DeleteValue(taskName);
-                    }
-                    catch { }
+                    DeleteRunKeyValue(taskName);
 
-                    // Yol boşluk içeriyorsa tırnak ekle
-                    string trValue = exePath.Contains(' ') ? $"\"{exePath}\"" : exePath;
-
+                    // /tr değeri içinde exe yolu her zaman tırnaklanır (iç tırnaklar \" ile kaçırılır)
                     // /it  = yalnızca oturum açık kullanıcı için çalış
                     // /rl highest = en yüksek yetkiyle başlat (UAC bypass)
                     // /f   = varsa üstüne yaz
-                    string args = $"/create /tn \"{taskName}\" /tr \"{trValue}\" /sc onlogon /rl highest /it /f";
-                    Process.Start(new ProcessStartInfo("schtasks.exe", args)
-                    {
-                        UseShellExecute = false,
-                        CreateNoWindow  = true
-                    })?.WaitForExit();
+                    string args = $"/create /tn \"{taskName}\" /tr \"\\\"{exePath}\\\"\" /sc onlogon /rl highest /it /f";
+                    RunSchtasks(args);
+                    Log($"Startup task registered: {exePath}");
                 }
                 else
                 {
-                    Process.Start(new ProcessStartInfo("schtasks.exe", $"/delete /tn \"{taskName}\" /f")
-                    {
-                        UseShellExecute = false,
-                        CreateNoWindow  = true
-                    })?.WaitForExit();
-
-                    try
-                    {
-                        using var regKey = Microsoft.Win32.Registry.CurrentUser
-                            .OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                        if (regKey?.GetValue(taskName) != null)
-                            regKey.DeleteValue(taskName);
-                    }
-                    catch { }
+                    RunSchtasks($"/delete /tn \"{taskName}\" /f");
+                    DeleteRunKeyValue(taskName);
                 }
             }
             catch (Exception ex)
@@ -534,10 +627,10 @@ namespace Warden
                 sb.AppendLine("into config.json or configure it inside the GUI.");
                 sb.AppendLine("==================================================");
 
-                string outputPath = Path.Combine(GetAppDataFolder(), "presets_list.txt");
+                string outputPath = Path.Combine(_appDataFolder, "presets_list.txt");
                 await File.WriteAllTextAsync(outputPath, sb.ToString());
 
-                Process.Start(new ProcessStartInfo
+                using var _ = Process.Start(new ProcessStartInfo
                 {
                     FileName = "notepad.exe",
                     Arguments = $"\"{outputPath}\"",
@@ -550,16 +643,33 @@ namespace Warden
             }
         }
 
+        /// <summary>
+        /// NotifyIcon bir WinForms nesnesidir ve thread-safe değildir; watcher/timer thread'lerinden
+        /// gelen bildirimler UI thread'ine yönlendirilir.
+        /// </summary>
+        private void ShowBalloon(int timeoutMs, string text, ToolTipIcon icon)
+        {
+            _app.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    if (_trayIcon.Visible)
+                        _trayIcon.ShowBalloonTip(timeoutMs, "Warden", text, icon);
+                }
+                catch { }
+            }));
+        }
+
         private void OnPresetChanged(string appName, string presetId, string presetName)
         {
             Log($"Active EQ Preset switched to match process: {appName} (Preset: {presetName})");
-            
+
             // Only show notification if we are switching to a game (not Desktop)
             if (appName != "Desktop")
             {
-                _trayIcon.ShowBalloonTip(2000, "Warden", $"Preset switched: {appName} -> {presetName}", ToolTipIcon.Info);
+                ShowBalloon(2000, Loc.Format("PresetSwitched", appName, presetName), ToolTipIcon.Info);
             }
-            
+
             // Dispatch to UI thread
             _app.Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -569,23 +679,28 @@ namespace Warden
 
         private void OnGpuDataUpdated(object? sender, GpuData data)
         {
-            // Update UI if window is open
-            _app.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                _mainWindow?.UpdateGpuData(data);
-            }));
+            // GpuMonitor DispatcherTimer kullanır → zaten UI thread'indeyiz
+            _mainWindow?.UpdateGpuData(data);
 
-            // Check thresholds in background
-            if (data.CoreClockMhz > Config.TargetMhz)
+            // Hedef MHz 0 (veya altı) ise otomatik profil devre dışı kabul edilir
+            if (Config.TargetMhz <= 0) return;
+
+            // Check thresholds
+            if (data.CoreClockMhz > Config.TargetMhz &&
+                (DateTime.UtcNow - _lastGpuProfileApplied).TotalSeconds > Config.CooldownSeconds)
             {
-                if ((DateTime.Now - _lastGpuProfileApplied).TotalSeconds > Config.CooldownSeconds)
+                // Bekleme süresi, başarısız denemede de başlatılır (Afterburner yoksa her 2 sn'de deneme yapılmaz)
+                _lastGpuProfileApplied = DateTime.UtcNow;
+
+                if (_afterburner.ApplyProfile(Config.TargetProfile))
                 {
-                    _afterburner.ApplyProfile(Config.TargetProfile);
-                    _lastGpuProfileApplied = DateTime.Now;
-                    
-                    string msg = $"Core clock reached {Math.Round(data.CoreClockMhz)} MHz. Profile {Config.TargetProfile} applied.";
+                    string msg = Loc.Format("GpuProfileApplied", Math.Round(data.CoreClockMhz), Config.TargetProfile);
                     Log($"[GPU Monitor] {msg}");
-                    _trayIcon.ShowBalloonTip(2000, "Warden", msg, ToolTipIcon.Warning);
+                    ShowBalloon(2000, msg, ToolTipIcon.Warning);
+                }
+                else
+                {
+                    Log($"[GPU Monitor] Clock {Math.Round(data.CoreClockMhz)} MHz > limit, but MSI Afterburner is not installed or could not be started.");
                 }
             }
         }
@@ -598,21 +713,16 @@ namespace Warden
         private void OnConnectionLost()
         {
             Log("SteelSeries GG bağlantısı kesildi.");
-            _trayIcon.ShowBalloonTip(
-                3000,
-                "Warden",
-                "SteelSeries GG bağlantısı kesildi. Yeniden bağlanmaya çalışıyor...",
-                ToolTipIcon.Warning);
+            ShowBalloon(3000, Loc.Get("ConnLost"), ToolTipIcon.Warning);
         }
 
         private void OnConnectionRestored()
         {
             Log("SteelSeries GG bağlantısı yeniden kuruldu.");
-            _trayIcon.ShowBalloonTip(
-                2000,
-                "Warden",
-                "SteelSeries GG bağlantısı yeniden kuruldu.",
-                ToolTipIcon.Info);
+            ShowBalloon(2000, Loc.Get("ConnRestored"), ToolTipIcon.Info);
+
+            // Bağlantı geri geldiğinde preset listesi boş kalmasın
+            _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.RefreshPresetsIfNeeded()));
         }
 
         private void Log(string message)
@@ -622,9 +732,13 @@ namespace Warden
 
             try
             {
-                string logPath = Path.Combine(GetAppDataFolder(), "logs", "service.log");
-                RotateLogIfNeeded(logPath, maxBytes: 1024 * 1024); // 1 MB
-                File.AppendAllText(logPath, logLine + Environment.NewLine);
+                // Log birden fazla thread'den (watcher, timer, UI) çağrılır; eşzamanlı yazma IOException
+                // ile satır kaybına yol açıyordu → kilitle
+                lock (_logLock)
+                {
+                    RotateLogIfNeeded(_logPath, maxBytes: 1024 * 1024); // 1 MB
+                    File.AppendAllText(_logPath, logLine + Environment.NewLine);
+                }
             }
             catch { }
         }
@@ -648,15 +762,17 @@ namespace Warden
 
         private void Exit()
         {
-            _deviceEnforceTimer?.Dispose();
-            _watcher?.Stop();
-            _gpuMonitor?.Stop();
-            _client.Dispose(); // FileSystemWatcher ve HttpClient'ı temizle
-            _app.Dispatcher.Invoke(() =>
+            // Her adım ayrı korunur: birindeki hata (ör. pencere kapatma) uygulamanın kapanmasını engellemesin
+            void Safe(Action a) { try { a(); } catch (Exception ex) { Log($"[Exit] {ex.Message}"); } }
+
+            Safe(() => _deviceEnforceTimer?.Dispose());
+            Safe(() => _watcher?.Stop());
+            Safe(() => _gpuMonitor?.Stop());
+            Safe(() => _app.Dispatcher.Invoke(() =>
             {
                 if (_desktopWidget != null)
                 {
-                    _desktopWidget.Close();
+                    _desktopWidget.CloseForReal();
                     _desktopWidget = null;
                 }
                 if (_mainWindow != null)
@@ -664,10 +780,14 @@ namespace Warden
                     _mainWindow.IsExitExplicit = true;
                     _mainWindow.Close();
                 }
+            }));
+            Safe(() => _throttleStopService?.Dispose());
+            Safe(() => _client.Dispose()); // FileSystemWatcher ve HttpClient'ı temizle
+            Safe(() =>
+            {
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
             });
-            _throttleStopService?.Dispose();
-            _trayIcon.Visible = false;
-            _trayIcon.Dispose();
             _app.Shutdown();
         }
     }
