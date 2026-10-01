@@ -37,7 +37,7 @@ Warden integrates directly with:
 
 *To build from source:*
 ```bash
-git clone https://github.com/AlparslanBurhan/Warden.git
+git clone https://github.com/AlperenNyKs/Warden.git
 cd Warden
 dotnet build -c Release
 ```
