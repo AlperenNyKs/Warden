@@ -1,0 +1,1437 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Navigation;
+using MessageBox  = System.Windows.MessageBox;
+using Color       = System.Windows.Media.Color;
+using Brush       = System.Windows.Media.Brush;
+using Brushes     = System.Windows.Media.Brushes;
+using FontFamily  = System.Windows.Media.FontFamily;
+using Cursors     = System.Windows.Input.Cursors;
+using Button         = System.Windows.Controls.Button;
+using ComboBox       = System.Windows.Controls.ComboBox;
+using Point          = System.Windows.Point;
+using Orientation    = System.Windows.Controls.Orientation;
+using ColorConverter = System.Windows.Media.ColorConverter;
+using HorizontalAlignment = System.Windows.HorizontalAlignment;
+
+namespace Warden
+{
+    public partial class MainWindow : Window
+    {
+        // ── State ──────────────────────────────────────────────────────
+        private readonly SteelSeriesClient _client;
+        private readonly TrayApplicationContext _context;
+        private readonly HardwareMonitorService _hardwareMonitor;
+        private List<SonarConfig> _availablePresets = new();
+        private string _currentPage = "profiles";
+        private TelemetrySnapshot? _lastTelemetrySnapshot;
+        private readonly Dictionary<string, (TextBlock txtVal, Button btnStar, Button btnGraph)> _categoryRowControls = new();
+        private readonly Dictionary<string, TextBlock> _favoriteValControls = new();
+        private string _lastCategoryStructureKey = "";
+        private string _lastFavoritesKey = "";
+
+        // ── Init ───────────────────────────────────────────────────────
+        public MainWindow(TrayApplicationContext context, SteelSeriesClient client)
+        {
+            InitializeComponent();
+            _context = context;
+            _client = client;
+
+            // Load window size
+            if (_context.Config.WindowWidth >= MinWidth) this.Width = _context.Config.WindowWidth;
+            if (_context.Config.WindowHeight >= MinHeight) this.Height = _context.Config.WindowHeight;
+            this.SizeChanged += MainWindow_SizeChanged;
+
+            // Initialize Hardware Monitor Service
+            _hardwareMonitor = new HardwareMonitorService();
+            _hardwareMonitor.Initialize(_context.Config.TelemetryFavorites, _context.Config.TelemetryGraphSensors);
+            _hardwareMonitor.TelemetryUpdated += OnTelemetryUpdated;
+
+            this.IsVisibleChanged += (s, e) =>
+            {
+                if (this.IsVisible && _currentPage == "telemetry")
+                    StartTelemetry();
+                else
+                    StopTelemetry();
+            };
+
+            LoadInitialConfig();
+            _ = LoadSonarPresetsAsync();
+
+            // Status LED pulse animasyonunu başlat
+            Loaded += (s, e) =>
+            {
+                var sb = (System.Windows.Media.Animation.Storyboard)FindResource("PulseAnimation");
+                sb.Begin(ledStatus);
+            };
+        }
+
+        private async void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (this.WindowState == WindowState.Normal)
+            {
+                _context.Config.WindowWidth = this.Width;
+                _context.Config.WindowHeight = this.Height;
+                
+                // Debounce disk I/O slightly
+                if (!_isSavingSize)
+                {
+                    _isSavingSize = true;
+                    await Task.Delay(1000);
+                    _context.SaveConfig();
+                    _isSavingSize = false;
+                }
+            }
+        }
+        private bool _isSavingSize = false;
+
+        // ══════════════════════════════════════════════════════════════
+        //  Window chrome
+        // ══════════════════════════════════════════════════════════════
+        private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.LeftButton == MouseButtonState.Pressed) DragMove();
+        }
+
+        private void MinimizeButton_Click(object sender, RoutedEventArgs e)
+            => Hide();
+
+        protected override void OnStateChanged(EventArgs e)
+        {
+            base.OnStateChanged(e);
+            if (WindowState == WindowState.Minimized)
+            {
+                Hide();
+                WindowState = WindowState.Normal;
+            }
+        }
+
+        private void MaximizeButton_Click(object sender, RoutedEventArgs e)
+            => WindowState = WindowState == WindowState.Maximized
+                ? WindowState.Normal
+                : WindowState.Maximized;
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+            => Hide();
+
+        private void BtnHide_Click(object sender, RoutedEventArgs e)
+            => Hide();
+
+        public bool IsExitExplicit = false;
+
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            StopTelemetry();
+            if (!IsExitExplicit)
+            {
+                e.Cancel = true;
+                this.Hide();
+            }
+            else
+            {
+                _hardwareMonitor.Dispose();
+                base.OnClosing(e);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Sidebar Navigation
+        // ══════════════════════════════════════════════════════════════
+        private void BtnNavHome_Click(object sender, RoutedEventArgs e)
+            => ShowPage("profiles");
+
+        private void BtnNavSettings_Click(object sender, RoutedEventArgs e)
+            => ShowPage("settings");
+
+        private void BtnNavTelemetry_Click(object sender, RoutedEventArgs e)
+            => ShowPage("telemetry");
+
+        private void BtnNavGpu_Click(object sender, RoutedEventArgs e)
+            => ShowPage("gpu");
+            
+        private void BtnNavDevice_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPage("devices");
+            LoadAudioDevices();
+        }
+
+        private void ShowPage(string page)
+        {
+            _currentPage = page;
+            pageProfiles.Visibility      = page == "profiles"  ? Visibility.Visible : Visibility.Collapsed;
+            pageDeviceManager.Visibility = page == "devices"   ? Visibility.Visible : Visibility.Collapsed;
+            pageGpuMonitor.Visibility    = page == "gpu"       ? Visibility.Visible : Visibility.Collapsed;
+            pageTelemetry.Visibility     = page == "telemetry" ? Visibility.Visible : Visibility.Collapsed;
+            pageSettings.Visibility      = page == "settings"  ? Visibility.Visible : Visibility.Collapsed;
+
+            rectHomeActive.Visibility      = page == "profiles"  ? Visibility.Visible : Visibility.Collapsed;
+            rectDeviceActive.Visibility    = page == "devices"   ? Visibility.Visible : Visibility.Collapsed;
+            rectGpuActive.Visibility       = page == "gpu"       ? Visibility.Visible : Visibility.Collapsed;
+            rectTelemetryActive.Visibility = page == "telemetry" ? Visibility.Visible : Visibility.Collapsed;
+            rectSettingsActive.Visibility  = page == "settings"  ? Visibility.Visible : Visibility.Collapsed;
+
+            btnNavHome.Foreground      = page == "profiles"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
+            btnNavDevice.Foreground    = page == "devices"   ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
+            btnNavGpu.Foreground       = page == "gpu"       ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
+            btnNavTelemetry.Foreground = page == "telemetry" ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
+            btnNavSettings.Foreground  = page == "settings"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
+
+            if (page == "telemetry")
+            {
+                StartTelemetry();
+            }
+            else
+            {
+                StopTelemetry();
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Data Loading
+        // ══════════════════════════════════════════════════════════════
+        private void LoadInitialConfig()
+        {
+            try
+            {
+                txtInterval.Text   = _context.Config.CheckIntervalMilliseconds.ToString();
+                chkStartup.IsChecked = _context.Config.StartWithWindows;
+                chkDesktopWidget.IsChecked = _context.Config.DesktopWidgetEnabled;
+                panelWidgetProfiles.Visibility = _context.Config.DesktopWidgetEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+                var visibleProfs = _context.Config.DesktopWidgetVisibleProfiles ?? new List<int> { 0, 1, 2, 3 };
+                chkWidgetProf1.IsChecked = visibleProfs.Contains(0);
+                chkWidgetProf2.IsChecked = visibleProfs.Contains(1);
+                chkWidgetProf3.IsChecked = visibleProfs.Contains(2);
+                chkWidgetProf4.IsChecked = visibleProfs.Contains(3);
+
+                foreach (ComboBoxItem item in cbLanguage.Items)
+                {
+                    if (item.Tag?.ToString() == _context.Config.Language)
+                    { cbLanguage.SelectedItem = item; break; }
+                }
+
+                // GPU Initial Values
+                txtTargetMhz.Text = _context.Config.TargetMhz.ToString();
+                foreach (ComboBoxItem item in cbTargetProfile.Items)
+                {
+                    if (item.Tag?.ToString() == _context.Config.TargetProfile.ToString())
+                    { cbTargetProfile.SelectedItem = item; break; }
+                }
+                foreach (ComboBoxItem item in cbCooldown.Items)
+                {
+                    if (item.Tag?.ToString() == _context.Config.CooldownSeconds.ToString())
+                    { cbCooldown.SelectedItem = item; break; }
+                }
+
+                // Device delay
+                txtDeviceDelay.Text = _context.Config.DeviceDisableDelaySeconds.ToString();
+
+                ApplyLanguage();
+                RenderRulesList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Config load error: {ex.Message}");
+            }
+        }
+
+        private async Task LoadSonarPresetsAsync()
+        {
+            txtConnectionStatus.Text = Loc.Get("Connecting");
+            ledStatus.Fill = new SolidColorBrush(Color.FromRgb(120, 120, 160));
+
+            try
+            {
+                string address = await _client.GetSonarAddressAsync();
+                txtConnectionStatus.Text = $"● {address.Replace("http://", "")}";
+                ledStatus.Fill = new SolidColorBrush(Color.FromRgb(78, 201, 126));
+
+                _availablePresets = await _client.GetConfigsAsync();
+
+                cbDefaultPreset.Items.Clear();
+
+                foreach (var preset in _availablePresets)
+                {
+                    if (preset.virtualAudioDevice == "game")
+                    {
+                        cbDefaultPreset.Items.Add(new PresetComboBoxItem { Text = preset.name, Value = preset.id });
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(_context.Config.DefaultPresetId))
+                    SelectComboBoxByValue(cbDefaultPreset, _context.Config.DefaultPresetId);
+
+                RenderRulesList();
+            }
+            catch (Exception ex)
+            {
+                txtConnectionStatus.Text = Loc.Get("ConnFailed");
+                ledStatus.Fill = new SolidColorBrush(Color.FromRgb(224, 85, 85));
+                txtActivePreset.Text = ex.Message;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Rules List Rendering (Inline Design)
+        // ══════════════════════════════════════════════════════════════
+        private void RenderRulesList()
+        {
+            spRules.Children.Clear();
+
+            foreach (var rule in _context.Config.Rules)
+            {
+                spRules.Children.Add(BuildRuleItem(rule.Key, rule.Value));
+            }
+
+            // Empty row for adding a new rule
+            spRules.Children.Add(BuildAddRow());
+        }
+
+        private List<string> GetKnownExeNames()
+        {
+            var list = new List<string>();
+            foreach (var exe in _context.Config.DiscoveredGames)
+            {
+                if (_context.Config.DiscoveredGameNames.TryGetValue(exe, out string? name) && !string.IsNullOrEmpty(name))
+                    list.Add($"{name} ({exe})");
+                else
+                    list.Add(exe);
+            }
+            return list.OrderBy(x => x).ToList();
+        }
+
+        private UIElement BuildRuleItem(string originalKey, string currentPresetId)
+        {
+            var rowBorder = new Border
+            {
+                Background = Brushes.Transparent,
+                BorderBrush = (Brush)FindResource("Border"),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(0, 12, 0, 12)
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Exe
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });                   // Arrow
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Preset
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });                      // Delete
+
+            // Exe ComboBox
+            string displayKey = originalKey;
+            if (_context.Config.DiscoveredGameNames.TryGetValue(originalKey, out string? gameName) && !string.IsNullOrEmpty(gameName))
+                displayKey = $"{gameName} ({originalKey})";
+
+            var cbExe = new ComboBox { IsEditable = false };
+            var knownExes = GetKnownExeNames();
+            if (!knownExes.Contains(displayKey))
+                knownExes.Insert(0, displayKey);
+
+            foreach (var exe in knownExes) cbExe.Items.Add(exe);
+            cbExe.SelectedItem = displayKey;
+            
+            Grid.SetColumn(cbExe, 0);
+            grid.Children.Add(cbExe);
+
+            // Arrow
+            var arrow = new TextBlock
+            {
+                Text = "→",
+                Foreground = (Brush)FindResource("TxtSecond"),
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(arrow, 1);
+            grid.Children.Add(arrow);
+
+            // Preset ComboBox
+            var cbPreset = new ComboBox { DisplayMemberPath = "Text", SelectedValuePath = "Value" };
+            foreach (var p in _availablePresets.Where(x => x.virtualAudioDevice == "game"))
+            {
+                cbPreset.Items.Add(new PresetComboBoxItem { Text = p.name, Value = p.id });
+            }
+            if (!string.IsNullOrEmpty(currentPresetId))
+                SelectComboBoxByValue(cbPreset, currentPresetId);
+            Grid.SetColumn(cbPreset, 2);
+            grid.Children.Add(cbPreset);
+
+            // Delete Button
+            var btnDel = new Button
+            {
+                Content = "🗑",
+                Style = (Style)FindResource("DangerButton"),
+                Padding = new Thickness(10, 5, 10, 5),
+                Margin = new Thickness(12, 0, 0, 0),
+                Cursor = Cursors.Hand
+            };
+            btnDel.Click += (s, e) =>
+            {
+                _context.Config.Rules.Remove(originalKey);
+                _context.SaveConfig();
+                _context.ReloadConfig();
+                RenderRulesList();
+            };
+            Grid.SetColumn(btnDel, 3);
+            grid.Children.Add(btnDel);
+
+            // Save logic
+            Action saveRule = () =>
+            {
+                string newKey = cbExe.Text.Trim();
+                if (newKey.EndsWith(")") && newKey.Contains("("))
+                {
+                    int start = newKey.LastIndexOf('(');
+                    newKey = newKey.Substring(start + 1, newKey.Length - start - 2).Trim();
+                }
+
+                var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
+
+                if (string.IsNullOrEmpty(newKey) || selectedPreset == null) return;
+
+                // Hiçbir şey değişmediyse gereksiz kayıt/reload yapma
+                bool keyChanged = !newKey.Equals(originalKey, StringComparison.OrdinalIgnoreCase);
+                bool presetChanged = selectedPreset.Value != currentPresetId;
+                if (!keyChanged && !presetChanged) return;
+
+                if (keyChanged)
+                {
+                    _context.Config.Rules.Remove(originalKey);
+                    if (!_context.Config.DiscoveredGames.Contains(newKey, StringComparer.OrdinalIgnoreCase))
+                        _context.Config.DiscoveredGames.Add(newKey);
+                }
+
+                _context.Config.Rules[newKey] = selectedPreset.Value;
+                _context.SaveConfig();
+                _context.ReloadConfig();
+
+                if (keyChanged)
+                {
+                    RenderRulesList();
+                }
+            };
+
+            cbExe.LostFocus += (s, e) => saveRule();
+            cbPreset.SelectionChanged += (s, e) => saveRule();
+
+            rowBorder.Child = grid;
+            return rowBorder;
+        }
+
+        private UIElement BuildAddRow()
+        {
+            var rowBorder = new Border
+            {
+                Background = Brushes.Transparent,
+                BorderBrush = (Brush)FindResource("Border"),
+                BorderThickness = new Thickness(0, 0, 0, 0),
+                Padding = new Thickness(0, 12, 0, 12)
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var cbExe = new ComboBox { IsEditable = false };
+            foreach (var exe in GetKnownExeNames()) cbExe.Items.Add(exe);
+            Grid.SetColumn(cbExe, 0);
+            grid.Children.Add(cbExe);
+
+            var arrow = new TextBlock
+            {
+                Text = "→",
+                Foreground = (Brush)FindResource("TxtSecond"),
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(arrow, 1);
+            grid.Children.Add(arrow);
+
+            var cbPreset = new ComboBox { DisplayMemberPath = "Text", SelectedValuePath = "Value" };
+            foreach (var p in _availablePresets.Where(x => x.virtualAudioDevice == "game"))
+            {
+                cbPreset.Items.Add(new PresetComboBoxItem { Text = p.name, Value = p.id });
+            }
+            Grid.SetColumn(cbPreset, 2);
+            grid.Children.Add(cbPreset);
+
+            var btnAdd = new Button
+            {
+                Content = "+ Ekle",
+                Style = (Style)FindResource("AccentButton"),
+                Padding = new Thickness(10, 5, 10, 5),
+                Margin = new Thickness(12, 0, 0, 0),
+                Cursor = Cursors.Hand
+            };
+
+            Action addRule = () =>
+            {
+                string newKey = cbExe.Text.Trim();
+                if (newKey.EndsWith(")") && newKey.Contains("("))
+                {
+                    int start = newKey.LastIndexOf('(');
+                    newKey = newKey.Substring(start + 1, newKey.Length - start - 2).Trim();
+                }
+
+                var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
+
+                if (string.IsNullOrEmpty(newKey) || selectedPreset == null) return;
+
+                _context.Config.Rules[newKey] = selectedPreset.Value;
+                if (!_context.Config.DiscoveredGames.Contains(newKey, StringComparer.OrdinalIgnoreCase))
+                    _context.Config.DiscoveredGames.Add(newKey);
+
+                _context.SaveConfig();
+                _context.ReloadConfig();
+                RenderRulesList(); // Re-render everything to convert this row to a normal rule
+            };
+
+            btnAdd.Click += (s, e) => addRule();
+            Grid.SetColumn(btnAdd, 3);
+            grid.Children.Add(btnAdd);
+
+            rowBorder.Child = grid;
+            return rowBorder;
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  UI Event Handlers – Profiles Page
+        // ══════════════════════════════════════════════════════════════
+
+        private void CbDefaultPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (cbDefaultPreset.SelectedItem is PresetComboBoxItem item)
+            {
+                _context.Config.DefaultPresetId = item.Value;
+                _context.SaveConfig();
+                _context.ReloadConfig();
+            }
+        }
+
+        private void BtnDeleteRule_Click(object sender, RoutedEventArgs e)
+        {
+            string? key = (sender as Button)?.Tag as string;
+            if (string.IsNullOrEmpty(key)) return;
+
+            _context.Config.Rules.Remove(key);
+            _context.SaveConfig();
+            _context.ReloadConfig();
+            RenderRulesList();
+        }
+
+        private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            _client.ResetAddress();
+            await LoadSonarPresetsAsync();
+        }
+
+        private void BtnScan_Click(object sender, RoutedEventArgs e)
+        {
+            lblScanBtn.Text = "Scanning...";
+            btnScan.IsEnabled = false;
+
+            Task.Run(() =>
+            {
+                var games = GameScanner.ScanAllGames();
+                Dispatcher.Invoke(() =>
+                {
+                    int added = 0;
+                    foreach (var g in games)
+                    {
+                        if (!_context.Config.DiscoveredGames.Contains(g.ExeName, StringComparer.OrdinalIgnoreCase))
+                        {
+                            _context.Config.DiscoveredGames.Add(g.ExeName);
+                            added++;
+                        }
+                        if (!string.IsNullOrEmpty(g.GameName))
+                        {
+                            _context.Config.DiscoveredGameNames[g.ExeName] = g.GameName;
+                        }
+                    }
+                    _context.SaveConfig();
+                    RenderRulesList();
+                    lblScanBtn.Text = Loc.Get("BtnScan");
+                    btnScan.IsEnabled = true;
+
+                    if (added > 0)
+                    {
+                        txtActivePreset.Text = Loc.Get("ScanDone").Replace("{0}", added.ToString());
+                        ledActive.Fill = new SolidColorBrush(Color.FromRgb(78, 201, 126));
+                    }
+                    else
+                    {
+                        txtActivePreset.Text = Loc.Get("ScanNone");
+                        ledActive.Fill = new SolidColorBrush(Color.FromRgb(120, 120, 160));
+                    }
+                });
+            });
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Events – Settings Page
+        // ══════════════════════════════════════════════════════════════
+        private void AutoSaveSettings()
+        {
+            if (!IsLoaded || _context == null) return;
+
+            if (int.TryParse(txtInterval.Text, out int interval))
+                _context.Config.CheckIntervalMilliseconds = interval;
+
+            _context.Config.StartWithWindows = chkStartup.IsChecked == true;
+
+            if (cbLanguage.SelectedItem is ComboBoxItem langItem)
+                _context.Config.Language = langItem.Tag?.ToString() ?? "TR";
+
+            _context.SaveConfig();
+            _context.ReloadConfig();
+        }
+
+        private void Setting_Changed(object sender, RoutedEventArgs e) 
+        {
+            AutoSaveSettings();
+        }
+
+        private void ChkDesktopWidget_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_context == null) return;
+            bool enabled = chkDesktopWidget.IsChecked == true;
+            panelWidgetProfiles.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            if (_context.Config.DesktopWidgetEnabled != enabled)
+            {
+                _context.Config.DesktopWidgetEnabled = enabled;
+                _context.SaveConfig();
+                if (enabled)
+                    _context.ShowDesktopWidget();
+                else
+                    _context.HideDesktopWidget();
+            }
+        }
+
+        private void ChkWidgetProfile_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _context == null) return;
+
+            var list = new List<int>();
+            if (chkWidgetProf1.IsChecked == true) list.Add(0);
+            if (chkWidgetProf2.IsChecked == true) list.Add(1);
+            if (chkWidgetProf3.IsChecked == true) list.Add(2);
+            if (chkWidgetProf4.IsChecked == true) list.Add(3);
+
+            // En az biri seçili olmalı, hiçbiri seçili değilse varsayılan hepsi
+            if (list.Count == 0)
+            {
+                list.Add(0);
+                chkWidgetProf1.IsChecked = true;
+            }
+
+            _context.Config.DesktopWidgetVisibleProfiles = list;
+            _context.SaveConfig();
+            _context.UpdateDesktopWidgetProfiles();
+        }
+
+        private void TxtInterval_LostFocus(object sender, RoutedEventArgs e)
+        {
+            AutoSaveSettings();
+        }
+
+        private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+        {
+            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+            e.Handled = true;
+        }
+
+        private void LoadAudioDevices()
+        {
+            var allDevices = AudioDeviceEnforcer.GetAllAudioDevices();
+            var vmList = new List<AudioDeviceViewModel>();
+            foreach (var (id, name, isRender) in allDevices)
+            {
+                string icon = isRender ? "🔊" : "🎤";
+                bool isDisabled = _context.Config.DisabledDevices.Contains(id) ||
+                                  AudioDeviceEnforcer.MatchesAnyName(name, _context.Config.DisabledDeviceNames);
+
+                vmList.Add(new AudioDeviceViewModel
+                {
+                    Id           = id,
+                    FriendlyName = $"{icon} {name}",
+                    IsDisabled   = isDisabled
+                });
+            }
+            listAudioDevices.ItemsSource = vmList;
+        }
+
+        private async void BtnSaveDevices_Click(object sender, RoutedEventArgs e)
+        {
+            // Gecikme değerini de kaydet
+            if (int.TryParse(txtDeviceDelay.Text, out int delayVal))
+                _context.Config.DeviceDisableDelaySeconds = Math.Clamp(delayVal, 0, 300);
+
+            if (listAudioDevices.ItemsSource is List<AudioDeviceViewModel> vmList)
+            {
+                _context.Config.DisabledDevices.Clear();
+                _context.Config.DisabledDeviceNames.Clear();
+
+                foreach (var vm in vmList)
+                {
+                    if (vm.IsDisabled)
+                    {
+                        _context.Config.DisabledDevices.Add(vm.Id);
+                        string cleanName = AudioDeviceEnforcer.CleanDeviceName(vm.FriendlyName);
+                        if (!string.IsNullOrEmpty(cleanName) && !_context.Config.DisabledDeviceNames.Contains(cleanName))
+                        {
+                            _context.Config.DisabledDeviceNames.Add(cleanName);
+                        }
+                    }
+                    AudioDeviceEnforcer.SetDeviceState(vm.Id, vm.IsDisabled);
+                }
+                _context.SaveConfig();
+
+                txtSavedDevice.Visibility = Visibility.Visible;
+                await System.Threading.Tasks.Task.Delay(3000);
+                txtSavedDevice.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void TxtDeviceDelay_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (int.TryParse(txtDeviceDelay.Text, out int val))
+            {
+                val = Math.Clamp(val, 0, 300);
+                txtDeviceDelay.Text = val.ToString();
+                _context.Config.DeviceDisableDelaySeconds = val;
+                _context.SaveConfig();
+            }
+            else
+            {
+                txtDeviceDelay.Text = _context.Config.DeviceDisableDelaySeconds.ToString();
+            }
+        }
+
+        private void CbLanguage_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (cbLanguage.SelectedItem is ComboBoxItem item && item.Tag != null)
+            {
+                string lang = item.Tag.ToString() ?? "TR";
+                Loc.CurrentLang = lang;
+                _context.Config.Language = lang;
+                ApplyLanguage();
+                AutoSaveSettings();
+            }
+        }
+
+        private void BtnSaveSettings_Click(object sender, RoutedEventArgs e)
+        {
+            if (int.TryParse(txtInterval.Text, out int interval))
+                _context.Config.CheckIntervalMilliseconds = interval;
+
+            _context.Config.StartWithWindows = chkStartup.IsChecked == true;
+
+            if (cbLanguage.SelectedItem is ComboBoxItem langItem)
+                _context.Config.Language = langItem.Tag?.ToString() ?? "TR";
+
+            _context.SaveConfig();
+            _context.ReloadConfig();
+
+            // Brief feedback on button
+            lblSaveBtn.Text = "✓ Saved";
+            Task.Delay(1500).ContinueWith(_ => Dispatcher.Invoke(() => lblSaveBtn.Text = Loc.Get("BtnSave")));
+        }
+
+        private void BtnClearGames_Click(object sender, RoutedEventArgs e)
+        {
+            _context.Config.DiscoveredGames.Clear();
+            _context.Config.DiscoveredGameNames.Clear();
+            _context.SaveConfig();
+            RenderRulesList();
+            MessageBox.Show(Loc.Get("ClearedSuccess"), Loc.Get("ClearedSuccessTitle"), MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void BtnBrowseExe_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "Executable Files|*.exe",
+                Title = Loc.Get("ManualAdd") ?? "Select EXE File",
+                CheckFileExists = false,
+                CheckPathExists = false,
+                ValidateNames = false
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                txtManualExe.Text = System.IO.Path.GetFileName(dialog.FileName);
+                if (string.IsNullOrEmpty(txtManualName.Text))
+                {
+                    txtManualName.Text = System.IO.Path.GetFileNameWithoutExtension(dialog.FileName);
+                }
+            }
+        }
+
+        private void BtnAddManual_Click(object sender, RoutedEventArgs e)
+        {
+            string exe = txtManualExe.Text.Trim();
+            string name = txtManualName.Text.Trim();
+
+            if (string.IsNullOrEmpty(exe)) return;
+
+            if (!exe.ToLower().EndsWith(".exe"))
+                exe += ".exe";
+
+            if (!_context.Config.DiscoveredGames.Contains(exe, StringComparer.OrdinalIgnoreCase))
+                _context.Config.DiscoveredGames.Add(exe);
+
+            if (!string.IsNullOrEmpty(name))
+                _context.Config.DiscoveredGameNames[exe] = name;
+            else if (!_context.Config.DiscoveredGameNames.ContainsKey(exe))
+                _context.Config.DiscoveredGameNames[exe] = "";
+
+            _context.SaveConfig();
+            RenderRulesList();
+            
+            txtManualExe.Text = "";
+            txtManualName.Text = "";
+            
+            MessageBox.Show(Loc.Get("ManualSuccess"), Loc.Get("Info"), MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  GPU UI Events
+        // ══════════════════════════════════════════════════════════════
+        private void GpuSetting_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _context == null) return;
+
+            if (double.TryParse(txtTargetMhz.Text, out double mhz))
+                _context.Config.TargetMhz = mhz;
+
+            if (cbTargetProfile.SelectedItem is ComboBoxItem profileItem && int.TryParse(profileItem.Tag?.ToString(), out int profile))
+                _context.Config.TargetProfile = profile;
+
+            if (cbCooldown.SelectedItem is ComboBoxItem cooldownItem && int.TryParse(cooldownItem.Tag?.ToString(), out int cd))
+                _context.Config.CooldownSeconds = cd;
+
+            _context.SaveConfig();
+        }
+
+        public void UpdateGpuData(GpuData data)
+        {
+            txtGpuClock.Text = Math.Round(data.CoreClockMhz).ToString();
+            txtGpuTemp.Text = data.TemperatureCelsius.ToString();
+            txtGpuUsage.Text = data.UsagePercentage.ToString();
+
+            if (data.CoreClockMhz > _context.Config.TargetMhz)
+                txtGpuClock.Foreground = (Brush)FindResource("Red");
+            else
+                txtGpuClock.Foreground = (Brush)FindResource("TxtPrimary");
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Localization
+        // ══════════════════════════════════════════════════════════════
+        private void ApplyLanguage()
+        {
+            lblPageHeader.Text      = Loc.Get("RulesHeader");
+            lblDefaultConfig.Text   = Loc.Get("DefaultEQ");
+            lblPerApp.Text          = Loc.Get("PerAppConfig");
+            lblSettingsHeader.Text  = Loc.Get("Settings");
+            lblStartWithWin.Text    = Loc.Get("StartWithWin");
+            lblLanguage.Text        = Loc.Get("Language");
+            lblScanInterval.Text    = Loc.Get("ScanInterval");
+            lblScanIntervalDesc.Text = Loc.Get("ScanIntervalDesc");
+            lblSaveBtn.Text         = Loc.Get("BtnSave");
+            lblScanBtn.Text         = Loc.Get("BtnScan");
+            lblGeneralSection.Text  = Loc.Get("GeneralSection");
+            lblStartWithWinDesc.Text = Loc.Get("StartWithWinDesc");
+            lblDesktopWidget.Text   = Loc.Get("DesktopWidget");
+            lblDesktopWidgetDesc.Text = Loc.Get("DesktopWidgetDesc");
+            lblBtnClear.Text        = Loc.Get("BtnClear");
+            lblManualAdd.Text       = Loc.Get("ManualAdd");
+            lblBtnAddManual.Text    = Loc.Get("BtnAddManual");
+            
+            // GPU
+            btnNavGpu.ToolTip           = Loc.Get("NavGpuMonitor");
+            lblGpuMonitorHeader.Text    = Loc.Get("GpuMonitorHeader");
+            lblGpuCoreClock.Text        = Loc.Get("GpuCoreClock");
+            lblGpuTemperature.Text      = Loc.Get("GpuTemperature");
+            lblGpuUsage.Text            = Loc.Get("GpuUsage");
+            lblGpuSettingsHeader.Text   = Loc.Get("GpuSettingsHeader");
+            lblGpuLimitTitle.Text       = Loc.Get("GpuLimitTitle");
+            lblGpuLimitDesc.Text        = Loc.Get("GpuLimitDesc");
+            lblGpuProfileTitle.Text     = Loc.Get("GpuProfileTitle");
+            lblGpuProfileDesc.Text      = Loc.Get("GpuProfileDesc");
+            lblGpuCooldownTitle.Text    = Loc.Get("GpuCooldownTitle");
+            lblGpuCooldownDesc.Text     = Loc.Get("GpuCooldownDesc");
+            
+            // Device Manager
+            btnNavDevice.ToolTip        = Loc.Get("NavDeviceManager");
+            lblDeviceManagerHeader.Text = Loc.Get("DeviceManagerHeader");
+            lblDeviceManagerDesc.Text   = Loc.Get("DeviceManagerDesc");
+            btnSaveDevices.Content      = Loc.Get("BtnSaveAndApply");
+            txtSavedDevice.Text         = Loc.Get("SavedSuccess");
+
+            // Telemetry
+            btnNavTelemetry.ToolTip     = Loc.Get("NavTelemetry");
+            lblTelemetryHeader.Text     = Loc.Get("TelemetryHeader");
+            lblTelemetryDesc.Text       = Loc.Get("TelemetryDesc");
+            lblFavoritesTitle.Text      = Loc.Get("FavoritesTitle");
+            lblLiveGraphTitle.Text      = Loc.Get("LiveGraphTitle");
+            txtNoGraphHint.Text         = Loc.Get("NoGraphSensorsHint");
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Hardware Telemetry & Monitor Logic
+        // ══════════════════════════════════════════════════════════════
+        private void StartTelemetry()
+        {
+            _hardwareMonitor?.Start(1000);
+        }
+
+        private void StopTelemetry()
+        {
+            _hardwareMonitor?.Stop();
+        }
+
+        private void OnTelemetryUpdated(object? sender, TelemetrySnapshot snapshot)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action<object?, TelemetrySnapshot>(OnTelemetryUpdated), sender, snapshot);
+                return;
+            }
+
+            if (!IsVisible || _currentPage != "telemetry") return;
+
+            _lastTelemetrySnapshot = snapshot;
+            RenderFavorites(snapshot.Favorites);
+            RenderGraph(snapshot.GraphSensors);
+            RenderCategories(snapshot.Categories);
+        }
+
+        private void RenderFavorites(List<TelemetrySensorItem> favorites)
+        {
+            if (favorites.Count == 0)
+            {
+                pnlFavoritesContainer.Visibility = Visibility.Collapsed;
+                _lastFavoritesKey = "";
+                _favoriteValControls.Clear();
+                return;
+            }
+
+            pnlFavoritesContainer.Visibility = Visibility.Visible;
+
+            string currentKey = string.Join(",", favorites.Select(f => f.Id));
+            if (currentKey == _lastFavoritesKey && _favoriteValControls.Count == favorites.Count)
+            {
+                foreach (var item in favorites)
+                {
+                    if (_favoriteValControls.TryGetValue(item.Id, out var txt))
+                    {
+                        txt.Text = item.FormattedValue;
+                    }
+                }
+                return;
+            }
+
+            _lastFavoritesKey = currentKey;
+            _favoriteValControls.Clear();
+            wpFavorites.Children.Clear();
+
+            foreach (var item in favorites)
+            {
+                var card = new Border
+                {
+                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#081517")),
+                    BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#16363B")),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12, 8, 12, 8),
+                    Margin = new Thickness(0, 0, 10, 10),
+                    MinWidth = 150
+                };
+
+                var sp = new StackPanel();
+
+                var topGrid = new Grid();
+                topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var badgeBorder = new Border
+                {
+                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#103035")),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(5, 1, 5, 1),
+                    HorizontalAlignment = HorizontalAlignment.Left
+                };
+                var badgeText = new TextBlock
+                {
+                    Text = item.Category,
+                    Foreground = (Brush)FindResource("Accent"),
+                    FontSize = 9,
+                    FontWeight = FontWeights.Bold
+                };
+                badgeBorder.Child = badgeText;
+                Grid.SetColumn(badgeBorder, 0);
+                topGrid.Children.Add(badgeBorder);
+
+                var btnStar = new Button
+                {
+                    Content = "★",
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FACC15")),
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    FontSize = 13,
+                    ToolTip = Loc.Get("UnpinFromFavorites"),
+                    Padding = new Thickness(0),
+                    Tag = item.Id
+                };
+                btnStar.Click += (s, e) =>
+                {
+                    if (s is Button b && b.Tag is string id)
+                    {
+                        ToggleFavorite(id);
+                    }
+                };
+                Grid.SetColumn(btnStar, 1);
+                topGrid.Children.Add(btnStar);
+                sp.Children.Add(topGrid);
+
+                var txtName = new TextBlock
+                {
+                    Text = item.Name,
+                    Foreground = (Brush)FindResource("TxtSecond"),
+                    FontSize = 11,
+                    Margin = new Thickness(0, 4, 0, 2),
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                };
+                sp.Children.Add(txtName);
+
+                var txtVal = new TextBlock
+                {
+                    Text = item.FormattedValue,
+                    Foreground = (Brush)FindResource("TxtPrimary"),
+                    FontSize = 16,
+                    FontWeight = FontWeights.Bold
+                };
+                sp.Children.Add(txtVal);
+                _favoriteValControls[item.Id] = txtVal;
+
+                card.Child = sp;
+                wpFavorites.Children.Add(card);
+            }
+        }
+
+        private void RenderGraph(List<TelemetrySensorItem> graphSensors)
+        {
+            wpGraphLegend.Children.Clear();
+
+            if (graphSensors.Count == 0)
+            {
+                txtNoGraphHint.Visibility = Visibility.Visible;
+                cvsChart.Children.Clear();
+                return;
+            }
+
+            txtNoGraphHint.Visibility = Visibility.Collapsed;
+
+            // Legend badges
+            foreach (var s in graphSensors)
+            {
+                var badge = new Border
+                {
+                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0A1618")),
+                    BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#183338")),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8, 4, 8, 4),
+                    Margin = new Thickness(0, 0, 8, 4)
+                };
+
+                var sp = new StackPanel { Orientation = Orientation.Horizontal };
+
+                var colorDot = new System.Windows.Shapes.Rectangle
+                {
+                    Width = 8,
+                    Height = 8,
+                    RadiusX = 2,
+                    RadiusY = 2,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.GraphColor)),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                sp.Children.Add(colorDot);
+
+                var txt = new TextBlock
+                {
+                    Text = $"{s.Name}: {s.FormattedValue}",
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#C5DCDE")),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                sp.Children.Add(txt);
+
+                var btnRemove = new Button
+                {
+                    Content = "✕",
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#607B80")),
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Margin = new Thickness(6, 0, 0, 0),
+                    Cursor = Cursors.Hand,
+                    FontSize = 10,
+                    Tag = s.Id,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                btnRemove.Click += (sender, e) =>
+                {
+                    if (sender is Button b && b.Tag is string id)
+                    {
+                        ToggleGraph(id);
+                    }
+                };
+                sp.Children.Add(btnRemove);
+
+                badge.Child = sp;
+                wpGraphLegend.Children.Add(badge);
+            }
+
+            DrawChartLines(graphSensors);
+        }
+
+        private void DrawChartLines(List<TelemetrySensorItem> graphSensors)
+        {
+            double width = cvsChart.ActualWidth;
+            double height = cvsChart.ActualHeight;
+            if (width <= 20 || height <= 20) return;
+
+            cvsChart.Children.Clear();
+
+            // Find min/max for scaling
+            float minVal = 0f;
+            float maxVal = 100f;
+            foreach (var s in graphSensors)
+            {
+                foreach (var v in s.History)
+                {
+                    if (v > maxVal) maxVal = v;
+                }
+            }
+            maxVal = (float)Math.Ceiling(maxVal * 1.1f / 10f) * 10f;
+
+            float range = maxVal - minVal;
+            if (range <= 0.01f) range = 1f;
+
+            foreach (var s in graphSensors)
+            {
+                if (s.History.Count < 2) continue;
+
+                var strokeBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.GraphColor));
+                var points = new PointCollection();
+                int count = s.History.Count;
+                double stepX = width / 59.0;
+
+                Point lastPoint = new Point();
+                for (int i = 0; i < count; i++)
+                {
+                    float val = s.History[i];
+                    double x = width - (count - 1 - i) * stepX;
+                    double y = height - ((val - minVal) / range) * (height - 16) - 8;
+                    if (y < 4) y = 4;
+                    if (y > height - 4) y = height - 4;
+
+                    var pt = new Point(x, y);
+                    points.Add(pt);
+                    if (i == count - 1) lastPoint = pt;
+                }
+
+                var polyline = new System.Windows.Shapes.Polyline
+                {
+                    Points = points,
+                    Stroke = strokeBrush,
+                    StrokeThickness = 2.0,
+                    StrokeLineJoin = PenLineJoin.Round
+                };
+                cvsChart.Children.Add(polyline);
+
+                var dot = new System.Windows.Shapes.Ellipse
+                {
+                    Width = 6,
+                    Height = 6,
+                    Fill = strokeBrush
+                };
+                Canvas.SetLeft(dot, lastPoint.X - 3);
+                Canvas.SetTop(dot, lastPoint.Y - 3);
+                cvsChart.Children.Add(dot);
+            }
+        }
+
+        private void RenderCategories(Dictionary<string, List<TelemetrySensorItem>> categories)
+        {
+            string currentKey = string.Join(";", categories.Select(kv => kv.Key + ":" + string.Join(",", kv.Value.Select(i => i.Id))));
+            if (currentKey == _lastCategoryStructureKey && _categoryRowControls.Count > 0)
+            {
+                foreach (var kv in categories)
+                {
+                    foreach (var item in kv.Value)
+                    {
+                        if (_categoryRowControls.TryGetValue(item.Id, out var row))
+                        {
+                            row.txtVal.Text = item.FormattedValue;
+                            row.btnStar.Content = item.IsFavorite ? "★" : "☆";
+                            row.btnStar.Foreground = item.IsFavorite 
+                                ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FACC15")) 
+                                : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B"));
+                            row.btnGraph.Foreground = item.IsOnGraph
+                                ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(item.GraphColor))
+                                : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B"));
+                        }
+                    }
+                }
+                return;
+            }
+
+            _lastCategoryStructureKey = currentKey;
+            _categoryRowControls.Clear();
+            pnlCategoriesContainer.Children.Clear();
+
+            string[] catOrder = { "CPU", "GPU", "Fans", "Motherboard", "Memory" };
+            foreach (var catKey in catOrder)
+            {
+                if (!categories.TryGetValue(catKey, out var items) || items.Count == 0)
+                    continue;
+
+                string catTitle = catKey switch
+                {
+                    "CPU" => $"💻 {Loc.Get("CategoryCpu")} — {items.FirstOrDefault()?.HardwareName ?? ""}",
+                    "GPU" => $"🎮 {Loc.Get("CategoryGpu")} — {items.FirstOrDefault()?.HardwareName ?? ""}",
+                    "Fans" => $"🌀 {Loc.Get("CategoryFans")}",
+                    "Motherboard" => $"⚡ {Loc.Get("CategoryMotherboard")}",
+                    "Memory" => $"💾 {Loc.Get("CategoryMemory")}",
+                    _ => catKey
+                };
+
+                var card = new Border
+                {
+                    Background = (Brush)FindResource("BgCard"),
+                    BorderBrush = (Brush)FindResource("BorderLight"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(16, 12, 16, 12),
+                    Margin = new Thickness(0, 0, 0, 14)
+                };
+
+                var sp = new StackPanel();
+
+                // Category Header
+                var headerText = new TextBlock
+                {
+                    Text = catTitle,
+                    Foreground = (Brush)FindResource("TxtPrimary"),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 13,
+                    Margin = new Thickness(0, 0, 0, 10)
+                };
+                sp.Children.Add(headerText);
+
+                // Sensor Rows
+                foreach (var item in items)
+                {
+                    var rowGrid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+                    rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    // Sensor Name
+                    var txtName = new TextBlock
+                    {
+                        Text = item.Name,
+                        Foreground = (Brush)FindResource("TxtSecond"),
+                        FontSize = 12,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    Grid.SetColumn(txtName, 0);
+                    rowGrid.Children.Add(txtName);
+
+                    // Formatted Value
+                    var txtVal = new TextBlock
+                    {
+                        Text = item.FormattedValue,
+                        Foreground = (Brush)FindResource("TxtPrimary"),
+                        FontWeight = FontWeights.SemiBold,
+                        FontSize = 13,
+                        Margin = new Thickness(12, 0, 16, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    Grid.SetColumn(txtVal, 1);
+                    rowGrid.Children.Add(txtVal);
+
+                    // Actions Panel (Star + Graph)
+                    var actionsSp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+                    // Star Button
+                    var btnStar = new Button
+                    {
+                        Content = item.IsFavorite ? "★" : "☆",
+                        Foreground = item.IsFavorite 
+                            ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FACC15")) 
+                            : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B")),
+                        Background = Brushes.Transparent,
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        FontSize = 14,
+                        Margin = new Thickness(0, 0, 8, 0),
+                        ToolTip = item.IsFavorite ? Loc.Get("UnpinFromFavorites") : Loc.Get("PinToFavorites"),
+                        Tag = item.Id
+                    };
+                    btnStar.Click += (s, e) =>
+                    {
+                        if (s is Button b && b.Tag is string id)
+                        {
+                            ToggleFavorite(id);
+                        }
+                    };
+                    actionsSp.Children.Add(btnStar);
+
+                    // Graph Button
+                    var btnGraph = new Button
+                    {
+                        Content = "📈",
+                        Foreground = item.IsOnGraph
+                            ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(item.GraphColor))
+                            : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3E565B")),
+                        Background = Brushes.Transparent,
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        FontSize = 13,
+                        ToolTip = item.IsOnGraph ? Loc.Get("RemoveFromGraph") : Loc.Get("PlotOnGraph"),
+                        Tag = item.Id
+                    };
+                    btnGraph.Click += (s, e) =>
+                    {
+                        if (s is Button b && b.Tag is string id)
+                        {
+                            ToggleGraph(id);
+                        }
+                    };
+                    actionsSp.Children.Add(btnGraph);
+
+                    Grid.SetColumn(actionsSp, 2);
+                    rowGrid.Children.Add(actionsSp);
+
+                    sp.Children.Add(rowGrid);
+                }
+
+                card.Child = sp;
+                pnlCategoriesContainer.Children.Add(card);
+            }
+        }
+
+        private void ToggleFavorite(string sensorId)
+        {
+            if (_hardwareMonitor == null) return;
+            _hardwareMonitor.ToggleFavorite(sensorId);
+
+            _context.Config.TelemetryFavorites = _hardwareMonitor.GetFavoriteIds();
+            _context.SaveConfig();
+        }
+
+        private void ToggleGraph(string sensorId)
+        {
+            if (_hardwareMonitor == null) return;
+            _hardwareMonitor.ToggleGraph(sensorId);
+
+            _context.Config.TelemetryGraphSensors = _hardwareMonitor.GetGraphSensorIds();
+            _context.SaveConfig();
+        }
+
+        private void CvsChart_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            DrawChartGrid();
+            if (_lastTelemetrySnapshot != null && _currentPage == "telemetry")
+            {
+                DrawChartLines(_lastTelemetrySnapshot.GraphSensors);
+            }
+        }
+
+        private void DrawChartGrid()
+        {
+            double width = cvsChartGrid.ActualWidth;
+            double height = cvsChartGrid.ActualHeight;
+            if (width <= 10 || height <= 10) return;
+
+            cvsChartGrid.Children.Clear();
+
+            for (int i = 1; i <= 3; i++)
+            {
+                double y = height * (i / 4.0);
+                var line = new System.Windows.Shapes.Line
+                {
+                    X1 = 0,
+                    Y1 = y,
+                    X2 = width,
+                    Y2 = y,
+                    Stroke = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0E1D20")),
+                    StrokeThickness = 1,
+                    StrokeDashArray = new DoubleCollection { 3, 3 }
+                };
+                cvsChartGrid.Children.Add(line);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Thread-safe callbacks from SonarWatcher
+        // ══════════════════════════════════════════════════════════════
+        public void UpdateActivePreset(string ruleName, string presetName)
+        {
+            if (!Dispatcher.CheckAccess())
+            { Dispatcher.BeginInvoke(new Action<string, string>(UpdateActivePreset), ruleName, presetName); return; }
+
+            bool isGame = ruleName != "Desktop";
+            string label = isGame
+                ? $"{ruleName}  →  {presetName}"
+                : $"{Loc.Get("Desktop")} ({presetName})";
+
+            txtActivePreset.Text       = label;
+            txtActivePreset.Foreground = isGame
+                ? new SolidColorBrush(Color.FromRgb(78, 201, 126))
+                : new SolidColorBrush(Color.FromRgb(120, 120, 160));
+            ledActive.Fill = isGame
+                ? new SolidColorBrush(Color.FromRgb(78, 201, 126))
+                : new SolidColorBrush(Color.FromRgb(120, 120, 160));
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Helpers
+        // ══════════════════════════════════════════════════════════════
+        private static void SelectComboBoxByValue(ComboBox cb, string value)
+        {
+            for (int i = 0; i < cb.Items.Count; i++)
+            {
+                if (cb.Items[i] is PresetComboBoxItem item && item.Value == value)
+                { cb.SelectedIndex = i; return; }
+            }
+        }
+    }
+
+    public class PresetComboBoxItem
+    {
+        public string Text  { get; set; } = "";
+        public string Value { get; set; } = "";
+        public override string ToString() => Text;
+    }
+
+    public class AudioDeviceViewModel
+    {
+        public string Id { get; set; } = string.Empty;
+        public string FriendlyName { get; set; } = string.Empty;
+        public bool IsDisabled { get; set; }
+    }
+}
