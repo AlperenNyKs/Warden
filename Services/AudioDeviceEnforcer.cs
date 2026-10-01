@@ -58,15 +58,6 @@ namespace Warden
             return false;
         }
 
-        public static void ApplyDisabledDevices(List<string> disabledDeviceIds)
-        {
-            if (disabledDeviceIds == null || disabledDeviceIds.Count == 0) return;
-            foreach (var id in disabledDeviceIds)
-            {
-                SetDeviceState(id, disable: true);
-            }
-        }
-
         /// <summary>
         /// Hem ID hem de Cihaz Adı (FriendlyName) bazında eşleşen aktif cihazları otomatik devre dışı bırakır.
         /// SteelSeries GG güncellendiğinde ID (GUID) değişse bile isim üzerinden yakalar ve devre dışı bırakır.

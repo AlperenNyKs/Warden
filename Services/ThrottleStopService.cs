@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -39,8 +40,9 @@ namespace Warden
 
         private IntPtr _cachedHwnd = IntPtr.Zero;
 
-        private string _exePath = @"D:\ThrottleStop_9.7\ThrottleStop.exe";
-        private string _iniPath = @"D:\ThrottleStop_9.7\ThrottleStop.ini";
+        // Boş = bulunamadı (Ayarlar sayfasından seçilebilir)
+        private string _exePath = "";
+        private string _iniPath = "";
         private FileSystemWatcher? _watcher;
         private System.Threading.Timer? _iniDebounceTimer;
         private readonly object _iniLock = new();
@@ -63,43 +65,83 @@ namespace Warden
 
         private void InitPaths(string? customPath)
         {
-            if (!string.IsNullOrEmpty(customPath) && File.Exists(customPath))
+            string? found = null;
+
+            if (!string.IsNullOrWhiteSpace(customPath) && File.Exists(customPath))
             {
-                _exePath = customPath;
-                _iniPath = Path.Combine(Path.GetDirectoryName(customPath)!, "ThrottleStop.ini");
+                found = customPath;
             }
             else
             {
-                // Fallback detection
-                string[] candidates =
-                {
-                    @"D:\ThrottleStop_9.7\ThrottleStop.exe",
-                    @"C:\ThrottleStop\ThrottleStop.exe",
-                    @"D:\ThrottleStop\ThrottleStop.exe",
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ThrottleStop", "ThrottleStop.exe")
-                };
+                if (!string.IsNullOrWhiteSpace(customPath))
+                    _log?.Invoke($"[THROTTLESTOP WARN] Configured path not found, auto-detecting: {customPath}");
+                found = AutoDetectExe();
+            }
 
-                foreach (var c in candidates)
-                {
-                    if (File.Exists(c))
-                    {
-                        _exePath = c;
-                        _iniPath = Path.Combine(Path.GetDirectoryName(c)!, "ThrottleStop.ini");
-                        break;
-                    }
-                }
+            if (found != null)
+            {
+                _exePath = found;
+                _iniPath = Path.Combine(Path.GetDirectoryName(found)!, "ThrottleStop.ini");
             }
         }
+
+        /// <summary>
+        /// Bilinen konumları ve sabit sürücülerin kökündeki "ThrottleStop*" klasörlerini
+        /// (ör. D:\ThrottleStop_9.7) tarar. Bulamazsa null döner.
+        /// </summary>
+        public static string? AutoDetectExe()
+        {
+            var candidates = new List<string>
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ThrottleStop", "ThrottleStop.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "ThrottleStop", "ThrottleStop.exe")
+            };
+
+            try
+            {
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
+                    try
+                    {
+                        foreach (var dir in Directory.GetDirectories(drive.RootDirectory.FullName, "ThrottleStop*"))
+                            candidates.Add(Path.Combine(dir, "ThrottleStop.exe"));
+                    }
+                    catch { /* Erişilemeyen sürücü */ }
+                }
+            }
+            catch { }
+
+            foreach (var c in candidates)
+            {
+                if (!string.IsNullOrEmpty(c) && File.Exists(c))
+                    return c;
+            }
+            return null;
+        }
+
+        /// <summary>ThrottleStop.exe bulundu mu?</summary>
+        public bool IsExeFound => !string.IsNullOrEmpty(_exePath) && File.Exists(_exePath);
 
         public string ExePath => _exePath;
         public string IniPath => _iniPath;
         public int ActiveProfile => _cachedActiveProfile;
         public string[] ProfileNames { get { lock (_profileNames) return (string[])_profileNames.Clone(); } }
 
+        /// <summary>Seçilen exe adına göre process adı (ör. "ThrottleStop"); exe bilinmiyorsa varsayılan.</summary>
+        private string ProcessName
+        {
+            get
+            {
+                string name = string.IsNullOrEmpty(_exePath) ? "" : Path.GetFileNameWithoutExtension(_exePath);
+                return string.IsNullOrEmpty(name) ? "ThrottleStop" : name;
+            }
+        }
+
         public bool IsRunning()
         {
             if (_cachedHwnd != IntPtr.Zero && IsWindow(_cachedHwnd)) return true;
-            var procs = Process.GetProcessesByName("ThrottleStop");
+            var procs = Process.GetProcessesByName(ProcessName);
             bool running = procs.Length > 0;
             foreach (var p in procs) p.Dispose();   // Process handle sızıntısını önle
             return running;
@@ -109,7 +151,7 @@ namespace Warden
         {
             try
             {
-                if (File.Exists(_exePath))
+                if (IsExeFound)
                 {
                     var psi = new ProcessStartInfo
                     {
@@ -120,7 +162,9 @@ namespace Warden
                     using var _ = Process.Start(psi);
                     return true;
                 }
-                _log?.Invoke($"[THROTTLESTOP WARN] Executable not found: {_exePath}");
+                _log?.Invoke(string.IsNullOrEmpty(_exePath)
+                    ? "[THROTTLESTOP WARN] ThrottleStop.exe not found. Set its location in Settings."
+                    : $"[THROTTLESTOP WARN] Executable not found: {_exePath}");
             }
             catch (Exception ex)
             {
@@ -133,12 +177,19 @@ namespace Warden
         {
             if (profileIndex < 0 || profileIndex > 3) return false;
 
+            int previous = _cachedActiveProfile;
             _cachedActiveProfile = profileIndex;
             ActiveProfileChanged?.Invoke(this, profileIndex);
 
             if (!IsRunning())
             {
-                if (!StartThrottleStop()) return false;
+                if (!StartThrottleStop())
+                {
+                    // ThrottleStop başlatılamadı → widget'ta yanlış profil aktif görünmesin
+                    _cachedActiveProfile = previous;
+                    ActiveProfileChanged?.Invoke(this, previous);
+                    return false;
+                }
 
                 // ThrottleStop'un açılış süresi sisteme göre değişir (uyarı penceresi vb.);
                 // sabit 1 sn yerine pencere bulunana kadar ~10 sn boyunca tekrar dene.
@@ -198,7 +249,7 @@ namespace Warden
 
         private IntPtr FindThrottleStopWindow()
         {
-            var processes = Process.GetProcessesByName("ThrottleStop");
+            var processes = Process.GetProcessesByName(ProcessName);
             if (processes.Length == 0) return IntPtr.Zero;
 
             IntPtr foundHwnd = IntPtr.Zero;

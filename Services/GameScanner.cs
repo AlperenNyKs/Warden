@@ -353,7 +353,8 @@ namespace Warden
                         string gameId = Path.GetFileName(dir);
                         string yamlPath = Path.Combine(dir, $"{gameId}.product_settings.yaml");
                         if (gameId.StartsWith("Riot Client", StringComparison.OrdinalIgnoreCase)) continue;
-                        if (File.Exists(yamlPath))
+                        if (!File.Exists(yamlPath)) continue;
+
                         try
                         {
                             string content = File.ReadAllText(yamlPath);

@@ -136,7 +136,13 @@ namespace Warden
                     { "SensorChipset", "Chipset" },
                     { "SensorVrm", "VRM MOS Temperature" },
                     { "SensorMemLoad", "Memory Usage (%)" },
-                    { "SensorMemUsed", "Used Memory" }
+                    { "SensorMemUsed", "Used Memory" },
+                    { "TsPath", "ThrottleStop Location" },
+                    { "TsPathDesc", "Path of ThrottleStop.exe. Leave empty to detect automatically." },
+                    { "TsPathFound", "✔ Using: {0}" },
+                    { "TsPathNotFound", "⚠ ThrottleStop not found — please select ThrottleStop.exe" },
+                    { "TsPathInvalid", "⚠ File not found or not an .exe: {0}" },
+                    { "TsBrowseTitle", "Select ThrottleStop.exe" }
                 }
             },
             {
@@ -267,7 +273,13 @@ namespace Warden
                     { "SensorChipset", "Yonga Seti (Chipset)" },
                     { "SensorVrm", "VRM MOS Sıcaklığı" },
                     { "SensorMemLoad", "Bellek Kullanımı (%)" },
-                    { "SensorMemUsed", "Kullanılan Bellek" }
+                    { "SensorMemUsed", "Kullanılan Bellek" },
+                    { "TsPath", "ThrottleStop Konumu" },
+                    { "TsPathDesc", "ThrottleStop.exe dosyasının yolu. Boş bırakılırsa otomatik aranır." },
+                    { "TsPathFound", "✔ Kullanılan: {0}" },
+                    { "TsPathNotFound", "⚠ ThrottleStop bulunamadı — lütfen ThrottleStop.exe dosyasını seçin" },
+                    { "TsPathInvalid", "⚠ Dosya bulunamadı veya .exe değil: {0}" },
+                    { "TsBrowseTitle", "ThrottleStop.exe dosyasını seçin" }
                 }
             }
         };

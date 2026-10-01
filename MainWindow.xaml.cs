@@ -207,6 +207,9 @@ namespace Warden
             btnNavTelemetry.Foreground = page == "telemetry" ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
             btnNavSettings.Foreground  = page == "settings"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
 
+            if (page == "settings")
+                UpdateThrottleStopStatus(); // Exe sonradan silinmiş/taşınmış olabilir
+
             if (page == "telemetry")
             {
                 StartTelemetry();
@@ -257,6 +260,9 @@ namespace Warden
 
                 // Device delay
                 txtDeviceDelay.Text = _context.Config.DeviceDisableDelaySeconds.ToString();
+
+                // ThrottleStop location
+                txtThrottleStopPath.Text = _context.Config.ThrottleStopPath;
 
                 ApplyLanguage();
                 RenderRulesList();
@@ -413,8 +419,12 @@ namespace Warden
 
             var cbExe = new ComboBox { IsEditable = false };
             var knownExes = GetKnownExeNames();
-            if (!knownExes.Contains(displayKey))
+            // Büyük/küçük harf farkı (ör. "Game.exe" / "game.exe") listede aynı oyunu iki kez göstermesin
+            string? existing = knownExes.FirstOrDefault(k => k.Equals(displayKey, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
                 knownExes.Insert(0, displayKey);
+            else
+                displayKey = existing;
 
             foreach (var exe in knownExes) cbExe.Items.Add(exe);
             cbExe.SelectedItem = displayKey;
@@ -722,6 +732,91 @@ namespace Warden
             _context.UpdateDesktopWidgetProfiles();
         }
 
+        // ── ThrottleStop konumu ─────────────────────────────────────────
+        private void TxtThrottleStopPath_LostFocus(object sender, RoutedEventArgs e)
+            => CommitThrottleStopPath(txtThrottleStopPath.Text);
+
+        private void TxtThrottleStopPath_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                CommitThrottleStopPath(txtThrottleStopPath.Text);
+                e.Handled = true;
+            }
+        }
+
+        private void BtnBrowseThrottleStop_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "ThrottleStop|ThrottleStop*.exe|Executable Files|*.exe",
+                Title = Loc.Get("TsBrowseTitle"),
+                CheckFileExists = true
+            };
+
+            // Mevcut konumun klasöründen başla
+            try
+            {
+                string current = _context.GetThrottleStopService().ExePath;
+                string? dir = string.IsNullOrEmpty(current) ? null : System.IO.Path.GetDirectoryName(current);
+                if (!string.IsNullOrEmpty(dir) && System.IO.Directory.Exists(dir))
+                    dialog.InitialDirectory = dir;
+            }
+            catch { }
+
+            if (dialog.ShowDialog(this) == true)
+            {
+                txtThrottleStopPath.Text = dialog.FileName;
+                CommitThrottleStopPath(dialog.FileName);
+            }
+        }
+
+        private void CommitThrottleStopPath(string rawPath)
+        {
+            if (_context == null || _isPopulatingControls) return;
+
+            string path = (rawPath ?? "").Trim().Trim('"');
+
+            // Değişmediyse servisi boşuna yeniden oluşturma
+            if (string.Equals(path, _context.Config.ThrottleStopPath, StringComparison.OrdinalIgnoreCase))
+            {
+                UpdateThrottleStopStatus();
+                return;
+            }
+
+            // Geçersiz yol kaydedilmez; kullanıcıya gösterilir (boş = otomatik algıla, geçerli)
+            if (path.Length > 0 &&
+                (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(path)))
+            {
+                txtThrottleStopStatus.Text = Loc.Format("TsPathInvalid", path);
+                txtThrottleStopStatus.Foreground = (Brush)FindResource("Red");
+                return;
+            }
+
+            _context.ApplyThrottleStopPath(path);
+            UpdateThrottleStopStatus();
+        }
+
+        private void UpdateThrottleStopStatus()
+        {
+            if (_context == null) return;
+            try
+            {
+                var ts = _context.GetThrottleStopService();
+                if (ts.IsExeFound)
+                {
+                    txtThrottleStopStatus.Text = Loc.Format("TsPathFound", ts.ExePath);
+                    txtThrottleStopStatus.Foreground = (Brush)FindResource("Accent");
+                }
+                else
+                {
+                    txtThrottleStopStatus.Text = Loc.Get("TsPathNotFound");
+                    txtThrottleStopStatus.Foreground = (Brush)FindResource("Red");
+                }
+            }
+            catch { }
+        }
+
         private void TxtInterval_LostFocus(object sender, RoutedEventArgs e)
         {
             AutoSaveSettings();
@@ -741,7 +836,8 @@ namespace Warden
                 {
                     Id           = id,
                     FriendlyName = $"{icon} {name}",
-                    IsDisabled   = isDisabled
+                    IsDisabled   = isDisabled,
+                    WasDisabled  = isDisabled
                 });
             }
             listAudioDevices.ItemsSource = vmList;
@@ -777,8 +873,14 @@ namespace Warden
                 _context.Config.DisabledDeviceNames = names;
                 _context.SaveConfig();
 
+                // Yalnızca durumu değişen cihazlara dokunulur. Eskiden işaretsiz TÜM cihazlar görünür yapılıyordu;
+                // kullanıcının Windows'ta kendisinin devre dışı bıraktığı cihazlar da yeniden açılıyordu.
+                // İşaretli olanlar her seferinde tekrar gizlenir (GG güncellemesiyle geri gelmiş olabilirler).
+                var changes = vmList.Where(vm => vm.IsDisabled || vm.WasDisabled)
+                                    .Select(vm => (vm.Id, vm.IsDisabled)).ToList();
+                foreach (var vm in vmList) vm.WasDisabled = vm.IsDisabled;
+
                 // COM çağrıları cihaz sayısına göre zaman alabilir → UI'yı dondurmamak için arka planda
-                var changes = vmList.Select(vm => (vm.Id, vm.IsDisabled)).ToList();
                 btnSaveDevices.IsEnabled = false;
                 try
                 {
@@ -1000,6 +1102,9 @@ namespace Warden
             lblGpuMonitorDesc.Text      = Loc.Get("GpuMonitorDesc");
             lblSettingsDesc.Text        = Loc.Get("SettingsDesc");
             lblWidgetProfilesTitle.Text = Loc.Get("WidgetProfilesTitle");
+            lblTsPath.Text              = Loc.Get("TsPath");
+            lblTsPathDesc.Text          = Loc.Get("TsPathDesc");
+            UpdateThrottleStopStatus();
             chkWidgetProf1.Content      = Loc.Get("WidgetProf1");
             chkWidgetProf2.Content      = Loc.Get("WidgetProf2");
             chkWidgetProf3.Content      = Loc.Get("WidgetProf3");
@@ -1569,5 +1674,6 @@ namespace Warden
         public string Id { get; set; } = string.Empty;
         public string FriendlyName { get; set; } = string.Empty;
         public bool IsDisabled { get; set; }
+        public bool WasDisabled { get; set; }   // Sayfa açıldığındaki / son kayıttaki durum
     }
 }

@@ -37,7 +37,8 @@ namespace Warden
         public double DesktopWidgetTop { get; set; } = 100;
         public bool DesktopWidgetLocked { get; set; } = false;
         public List<int> DesktopWidgetVisibleProfiles { get; set; } = new() { 0, 1, 2, 3 };
-        public string ThrottleStopPath { get; set; } = @"D:\ThrottleStop_9.7\ThrottleStop.exe";
+        // Boş = otomatik algıla (ThrottleStopService bilinen konumları tarar). Ayarlar sayfasından değiştirilebilir.
+        public string ThrottleStopPath { get; set; } = "";
 
         // UI Settings (MainWindow.xaml varsayılanlarıyla aynı)
         public double WindowWidth { get; set; } = 940;
@@ -77,7 +78,7 @@ namespace Warden
                 DesktopWidgetVisibleProfiles = new() { 0, 1, 2, 3 };
 
             DefaultPresetId ??= "";
-            ThrottleStopPath ??= "";
+            ThrottleStopPath = (ThrottleStopPath ?? "").Trim().Trim('"');
             Language = string.Equals(Language, "EN", StringComparison.OrdinalIgnoreCase) ? "EN" : "TR";
 
             CheckIntervalMilliseconds = Math.Clamp(CheckIntervalMilliseconds, MinCheckIntervalMs, MaxCheckIntervalMs);

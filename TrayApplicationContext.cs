@@ -34,6 +34,7 @@ namespace Warden
 
         // ThrottleStop & Desktop Widget
         private ThrottleStopService? _throttleStopService;
+        private string? _throttleStopServicePath; // Servisin oluşturulduğu config yolu
         private DesktopWidgetWindow? _desktopWidget;
 
         // Akıllı ReloadConfig: interval değişmediğinde watcher'ı yeniden başlatmamak için
@@ -166,6 +167,26 @@ namespace Warden
         /// <summary>Tray menüsündeki "Reload Config": config.json'ı diskten yeniden okur.</summary>
         private void ReloadConfigFromDisk()
         {
+            // Diskteki ThrottleStop yolu değiştiyse servis yeni yolla yeniden oluşturulsun
+            if (_throttleStopService != null)
+            {
+                string diskPath = "";
+                try
+                {
+                    if (File.Exists(_configPath))
+                        diskPath = (JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(_configPath))?.ThrottleStopPath ?? "").Trim().Trim('"');
+                }
+                catch { diskPath = _throttleStopServicePath ?? ""; }
+
+                if (!string.Equals(diskPath, _throttleStopServicePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    _desktopWidget?.CloseForReal();
+                    _desktopWidget = null;
+                    _throttleStopService.Dispose();
+                    _throttleStopService = null;
+                }
+            }
+
             LoadConfigAndStart();
             _mainWindow?.ReloadFromConfig();
         }
@@ -368,8 +389,38 @@ namespace Warden
             if (_throttleStopService == null)
             {
                 _throttleStopService = new ThrottleStopService(Config.ThrottleStopPath, Log);
+                _throttleStopServicePath = Config.ThrottleStopPath;
             }
             return _throttleStopService;
+        }
+
+        /// <summary>
+        /// Ayarlar sayfasından ThrottleStop konumu değiştirildiğinde çağrılır: config'i kaydeder,
+        /// servisi yeni yolla yeniden oluşturur ve widget'ı yeni servise bağlar.
+        /// </summary>
+        public void ApplyThrottleStopPath(string path)
+        {
+            _app.Dispatcher.Invoke(() =>
+            {
+                Config.ThrottleStopPath = (path ?? "").Trim().Trim('"');
+                SaveConfig();
+
+                // Widget eski servisin olaylarına abone; önce widget kapatılır, sonra servis değiştirilir
+                bool widgetWasOpen = _desktopWidget != null;
+                if (_desktopWidget != null)
+                {
+                    _desktopWidget.CloseForReal();
+                    _desktopWidget = null;
+                }
+
+                _throttleStopService?.Dispose();
+                _throttleStopService = null;
+                var ts = GetThrottleStopService();
+                Log($"[THROTTLESTOP] Location set to '{Config.ThrottleStopPath}', using '{ts.ExePath}'");
+
+                if (widgetWasOpen && Config.DesktopWidgetEnabled)
+                    ShowDesktopWidget();
+            });
         }
 
         public void ShowDesktopWidget()
@@ -427,7 +478,17 @@ namespace Warden
         {
             _app.Dispatcher.Invoke(() =>
             {
-                _desktopWidget?.Hide();
+                if (_desktopWidget == null) return;
+
+                // Widget eski bir config nesnesini tutuyorsa (diskten yeniden yükleme sonrası) o nesnede
+                // "etkin" hâlâ true olabilir ve gizleme engellenir → widget tamamen kapatılır.
+                if (!_desktopWidget.UsesConfig(Config))
+                {
+                    _desktopWidget.CloseForReal();
+                    _desktopWidget = null;
+                    return;
+                }
+                _desktopWidget.Hide();
             });
         }
 

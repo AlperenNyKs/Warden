@@ -984,6 +984,27 @@
                                                     <CheckBox x:Name="chkWidgetProf4" Content="🔋 Pil" Margin="0,0,0,0" Checked="ChkWidgetProfile_Changed" Unchecked="ChkWidgetProfile_Changed"/>
                                                 </WrapPanel>
                                             </StackPanel>
+
+                                            <!-- ThrottleStop Location -->
+                                            <Separator Background="{StaticResource Border}" Margin="0,10,0,8"/>
+                                            <TextBlock x:Name="lblTsPath" Text="ThrottleStop Konumu"
+                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                            <TextBlock x:Name="lblTsPathDesc" Text="ThrottleStop.exe dosyasının yolu. Boş bırakılırsa otomatik aranır."
+                                                       Foreground="{StaticResource TxtSecond}" FontSize="11" Margin="0,0,0,6"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="txtThrottleStopPath" LostFocus="TxtThrottleStopPath_LostFocus"
+                                                         KeyDown="TxtThrottleStopPath_KeyDown"/>
+                                                <Button x:Name="btnBrowseThrottleStop" Grid.Column="1"
+                                                        Style="{StaticResource FlatButton}"
+                                                        Padding="10,6" Margin="6,0,0,0" Content="📁"
+                                                        Click="BtnBrowseThrottleStop_Click"/>
+                                            </Grid>
+                                            <TextBlock x:Name="txtThrottleStopStatus" FontSize="11" Margin="0,4,0,0"
+                                                       Foreground="{StaticResource TxtSecond}" TextTrimming="CharacterEllipsis"/>
                                         </StackPanel>
                                     </Border>
 

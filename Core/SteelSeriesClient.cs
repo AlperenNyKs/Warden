@@ -109,8 +109,10 @@ namespace Warden
 
         public async Task<string> GetSonarAddressAsync()
         {
-            if (!string.IsNullOrEmpty(_sonarAddress))
-                return _sonarAddress;
+            // Alan başka thread'den sıfırlanabilir → yerel kopya üzerinden kontrol et
+            string? cached = _sonarAddress;
+            if (!string.IsNullOrEmpty(cached))
+                return cached;
 
             Exception? lastException = null;
 
@@ -125,8 +127,11 @@ namespace Warden
 
                 try
                 {
-                    await ReadSonarAddressAsync();
-                    return _sonarAddress!;
+                    // Değer doğrudan döndürülür: okuma ile return arasında başka bir thread ResetAddress()
+                    // çağırırsa alan null olabiliyordu.
+                    string address = await ReadSonarAddressAsync();
+                    _sonarAddress = address;
+                    return address;
                 }
                 catch (Exception ex)
                 {
@@ -142,9 +147,9 @@ namespace Warden
 
         /// <summary>
         /// coreProps.json → /subApps → webServerAddress zincirini gerçekleştirir.
-        /// Başarılı olursa _sonarAddress'i doldurur.
+        /// Başarılı olursa Sonar web sunucusu adresini döndürür.
         /// </summary>
-        private async Task ReadSonarAddressAsync()
+        private async Task<string> ReadSonarAddressAsync()
         {
             string corePropsPath = GetCorePropsPath();
             string jsonContent   = await File.ReadAllTextAsync(corePropsPath);
@@ -152,16 +157,22 @@ namespace Warden
             using var doc  = JsonDocument.Parse(jsonContent);
             var root = doc.RootElement;
 
+            // ggEncryptedAddress HTTPS (self-signed) portudur; eski sürümlerdeki "address" ise düz HTTP'dir.
+            // Eskiden ikisine de https:// ile gidiliyordu ve "address" yedeği hiç çalışmıyordu.
             string ggAddress = "";
+            string scheme = "https";
             if (root.TryGetProperty("ggEncryptedAddress", out var ggAddrProp))
                 ggAddress = ggAddrProp.GetString() ?? "";
-            else if (root.TryGetProperty("address", out var addrProp))
+            if (string.IsNullOrEmpty(ggAddress) && root.TryGetProperty("address", out var addrProp))
+            {
                 ggAddress = addrProp.GetString() ?? "";
+                scheme = "http";
+            }
 
             if (string.IsNullOrEmpty(ggAddress))
                 throw new Exception("coreProps.json içinde geçerli bir API adresi bulunamadı.");
 
-            string subAppsUrl = $"https://{ggAddress}/subApps";
+            string subAppsUrl = $"{scheme}://{ggAddress}/subApps";
             using HttpResponseMessage response = await _httpClient.GetAsync(subAppsUrl);
             response.EnsureSuccessStatusCode();
 
@@ -193,8 +204,7 @@ namespace Warden
                     throw new Exception("Sonar webServerAddress boş (Sonar kapalı olabilir).");
                 if (!webAddr.StartsWith("http://") && !webAddr.StartsWith("https://"))
                     webAddr = $"http://{webAddr}";
-                _sonarAddress = webAddr;
-                return;
+                return webAddr;
             }
 
             throw new Exception("Sonar metadata içinde webServerAddress bulunamadı.");
