@@ -63,4 +63,4 @@ dotnet run -c Release
      Program Files ve sürücü köklerindeki `ThrottleStop*` klasörleri (ör. `D:\ThrottleStop_9.7`) otomatik aranır.
 
 7. **Kapatma:**
-   - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Exit"** diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.
+   - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Çıkış"** (İngilizcede "Exit") diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.
