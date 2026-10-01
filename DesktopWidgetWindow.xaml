@@ -104,10 +104,10 @@
             <ContextMenu Background="#131C26" Foreground="#F8FAFC" BorderBrush="#2A394A">
                 <MenuItem x:Name="menuLock" Header="🔒 Konumu Kilitle" Click="MenuLock_Click"/>
                 <Separator Background="#2A394A"/>
-                <MenuItem Header="⚡ ThrottleStop'u Başlat" Click="MenuStartTS_Click"/>
-                <MenuItem Header="⚙️ Warden Ayarları (Profil Seçimi)" Click="MenuOpenWarden_Click"/>
+                <MenuItem x:Name="menuStartTS" Header="⚡ ThrottleStop'u Başlat" Click="MenuStartTS_Click"/>
+                <MenuItem x:Name="menuOpenWarden" Header="⚙️ Warden Ayarları (Profil Seçimi)" Click="MenuOpenWarden_Click"/>
                 <Separator Background="#2A394A"/>
-                <MenuItem Header="❌ Widget'ı Gizle" Click="MenuHideWidget_Click"/>
+                <MenuItem x:Name="menuHideWidget" Header="❌ Widget'ı Gizle" Click="MenuHideWidget_Click"/>
             </ContextMenu>
         </Border.ContextMenu>
 

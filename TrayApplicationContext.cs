@@ -70,23 +70,11 @@ namespace Warden
                     ShowMainWindow();
             };
 
-            // 2. Context Menu
-            var contextMenu = new ContextMenuStrip();
-            contextMenu.Items.Add("Open Settings", null, (s, e) => ShowMainWindow());
-            var widgetMenuItem = new ToolStripMenuItem("Masaüstü Widget'ı", null, (s, e) => ToggleDesktopWidget());
-            contextMenu.Items.Add(widgetMenuItem);
-            contextMenu.Items.Add("Reload Config", null, (s, e) => LoadConfigAndStart());
-            contextMenu.Items.Add("Discover Presets", null, async (s, e) => await DiscoverFromTray());
-            contextMenu.Items.Add(new ToolStripSeparator());
-            contextMenu.Items.Add("Exit", null, (s, e) => Exit());
-            contextMenu.Opening += (s, e) =>
-            {
-                widgetMenuItem.Checked = Config.DesktopWidgetEnabled;
-            };
-            _trayIcon.ContextMenuStrip = contextMenu;
-
-            // 3. Load config and start watcher
+            // 2. Load config and start watcher
             LoadConfigAndStart();
+
+            // 3. Initialize Context Menu
+            UpdateTrayMenu();
 
             // 4. Pre-create MainWindow on background idle dispatcher so opening from tray is instantaneous (0ms)
             _app.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
@@ -127,6 +115,31 @@ namespace Warden
             return System.Drawing.SystemIcons.Application;
         }
 
+        public void UpdateTrayMenu()
+        {
+            var contextMenu = new ContextMenuStrip();
+            contextMenu.Items.Add(Loc.Get("TrayOpenSettings"), null, (s, e) => ShowMainWindow());
+            var widgetMenuItem = new ToolStripMenuItem(Loc.Get("TrayDesktopWidget"), null, (s, e) => ToggleDesktopWidget());
+            contextMenu.Items.Add(widgetMenuItem);
+            contextMenu.Items.Add(Loc.Get("TrayReloadConfig"), null, (s, e) => LoadConfigAndStart());
+            contextMenu.Items.Add(Loc.Get("TrayDiscoverPresets"), null, async (s, e) => await DiscoverFromTray());
+            contextMenu.Items.Add(new ToolStripSeparator());
+            contextMenu.Items.Add(Loc.Get("TrayExit"), null, (s, e) => Exit());
+            contextMenu.Opening += (s, e) =>
+            {
+                widgetMenuItem.Checked = Config.DesktopWidgetEnabled;
+            };
+            _trayIcon.ContextMenuStrip = contextMenu;
+        }
+
+        public void UpdateDesktopWidgetLanguage()
+        {
+            _app.Dispatcher.Invoke(() =>
+            {
+                _desktopWidget?.ApplyLanguage();
+            });
+        }
+
         public void ReloadConfig()
         {
             // Interval değiştiyse veya watcher hiç oluşturulmadıysa → tam restart
@@ -138,6 +151,8 @@ namespace Warden
 
             // Sadece kural/preset/dil değiştiyse → watcher'ı durdurmadan hot-update
             Loc.CurrentLang = Config.Language;
+            UpdateTrayMenu();
+            UpdateDesktopWidgetLanguage();
             SetStartup(Config.StartWithWindows);
             _watcher.UpdateConfig(Config.DefaultPresetId, Config.Rules);
             StartDeviceEnforcement();
@@ -271,6 +286,8 @@ namespace Warden
 
                 // Apply Localization
                 Loc.CurrentLang = Config.Language;
+                UpdateTrayMenu();
+                UpdateDesktopWidgetLanguage();
 
                 // Apply Startup Registry
                 SetStartup(Config.StartWithWindows);

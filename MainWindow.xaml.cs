@@ -368,7 +368,8 @@ namespace Warden
                 Style = (Style)FindResource("DangerButton"),
                 Padding = new Thickness(10, 5, 10, 5),
                 Margin = new Thickness(12, 0, 0, 0),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                ToolTip = Loc.Get("BtnDeleteRule")
             };
             btnDel.Click += (s, e) =>
             {
@@ -464,11 +465,12 @@ namespace Warden
 
             var btnAdd = new Button
             {
-                Content = "+ Ekle",
+                Content = "+ " + Loc.Get("BtnAddManual"),
                 Style = (Style)FindResource("AccentButton"),
                 Padding = new Thickness(10, 5, 10, 5),
                 Margin = new Thickness(12, 0, 0, 0),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                ToolTip = Loc.Get("BtnAddRule")
             };
 
             Action addRule = () =>
@@ -534,7 +536,7 @@ namespace Warden
 
         private void BtnScan_Click(object sender, RoutedEventArgs e)
         {
-            lblScanBtn.Text = "Scanning...";
+            lblScanBtn.Text = Loc.CurrentLang == "TR" ? "Taranıyor..." : "Scanning...";
             btnScan.IsEnabled = false;
 
             Task.Run(() =>
@@ -722,6 +724,11 @@ namespace Warden
                 Loc.CurrentLang = lang;
                 _context.Config.Language = lang;
                 ApplyLanguage();
+                RenderRulesList();
+                _lastCategoryStructureKey = "";
+                _lastFavoritesKey = "";
+                _context.UpdateTrayMenu();
+                _context.UpdateDesktopWidgetLanguage();
                 AutoSaveSettings();
             }
         }
@@ -740,8 +747,8 @@ namespace Warden
             _context.ReloadConfig();
 
             // Brief feedback on button
-            lblSaveBtn.Text = "✓ Saved";
-            Task.Delay(1500).ContinueWith(_ => Dispatcher.Invoke(() => lblSaveBtn.Text = Loc.Get("BtnSave")));
+            lblSaveBtn.Text = "✓ " + (Loc.CurrentLang == "TR" ? "Kaydedildi" : "Saved");
+            Task.Delay(1500).ContinueWith(_ => Dispatcher.Invoke(() => lblSaveBtn.Text = Loc.Get("BtnSaveSettings")));
         }
 
         private void BtnClearGames_Click(object sender, RoutedEventArgs e)
@@ -837,27 +844,42 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         private void ApplyLanguage()
         {
-            lblPageHeader.Text      = Loc.Get("RulesHeader");
-            lblDefaultConfig.Text   = Loc.Get("DefaultEQ");
-            lblPerApp.Text          = Loc.Get("PerAppConfig");
-            lblSettingsHeader.Text  = Loc.Get("Settings");
-            lblStartWithWin.Text    = Loc.Get("StartWithWin");
-            lblLanguage.Text        = Loc.Get("Language");
-            lblScanInterval.Text    = Loc.Get("ScanInterval");
-            lblScanIntervalDesc.Text = Loc.Get("ScanIntervalDesc");
-            lblSaveBtn.Text         = Loc.Get("BtnSave");
-            lblScanBtn.Text         = Loc.Get("BtnScan");
-            lblGeneralSection.Text  = Loc.Get("GeneralSection");
-            lblStartWithWinDesc.Text = Loc.Get("StartWithWinDesc");
-            lblDesktopWidget.Text   = Loc.Get("DesktopWidget");
-            lblDesktopWidgetDesc.Text = Loc.Get("DesktopWidgetDesc");
-            lblBtnClear.Text        = Loc.Get("BtnClear");
-            lblManualAdd.Text       = Loc.Get("ManualAdd");
-            lblBtnAddManual.Text    = Loc.Get("BtnAddManual");
-            
-            // GPU
+            // Title Bar & Chrome
+            txtOnlineBadge.Text         = Loc.Get("Online");
+            btnMinimizeTitle.ToolTip    = Loc.Get("ToolTipMinimize");
+            btnMaximizeTitle.ToolTip    = Loc.Get("ToolTipMaximize");
+            btnCloseTitle.ToolTip       = Loc.Get("ToolTipClose");
+
+            // Sidebar Navigation Tooltips
+            btnNavHome.ToolTip          = Loc.Get("NavHome");
+            btnNavDevice.ToolTip        = Loc.Get("NavDeviceManager");
             btnNavGpu.ToolTip           = Loc.Get("NavGpuMonitor");
+            btnNavTelemetry.ToolTip     = Loc.Get("NavTelemetry");
+            btnNavSettings.ToolTip      = Loc.Get("NavSettings");
+
+            // Profiles Page
+            lblPageHeader.Text          = Loc.Get("RulesHeader");
+            lblPageDesc.Text            = Loc.Get("RulesDesc");
+            lblDefaultConfig.Text       = Loc.Get("DefaultEQ");
+            lblDefaultConfigDesc.Text   = Loc.Get("DefaultEQDesc");
+            lblPerApp.Text              = Loc.Get("PerAppConfig");
+            lblTargetPresetHeader.Text  = Loc.Get("TargetSonarConfig");
+            lblScanBtn.Text             = Loc.Get("BtnScan");
+            lblBtnClear.Text            = Loc.Get("BtnClear");
+            lblManualAdd.Text           = Loc.Get("ManualAdd");
+            lblBtnAddManual.Text        = Loc.Get("BtnAddManual");
+            btnBrowseExe.ToolTip        = Loc.Get("ManualBrowse");
+            
+            // Device Manager
+            lblDeviceManagerHeader.Text = Loc.Get("DeviceManagerHeader");
+            lblDeviceManagerDesc.Text   = Loc.Get("DeviceManagerDesc");
+            lblDeviceDelay.Text         = Loc.Get("DeviceDelayTitle");
+            btnSaveDevices.Content      = Loc.Get("BtnSaveAndApply");
+            txtSavedDevice.Text         = Loc.Get("SavedSuccess");
+
+            // GPU Monitor
             lblGpuMonitorHeader.Text    = Loc.Get("GpuMonitorHeader");
+            lblGpuMonitorDesc.Text      = Loc.Get("GpuMonitorDesc");
             lblGpuCoreClock.Text        = Loc.Get("GpuCoreClock");
             lblGpuTemperature.Text      = Loc.Get("GpuTemperature");
             lblGpuUsage.Text            = Loc.Get("GpuUsage");
@@ -869,20 +891,31 @@ namespace Warden
             lblGpuCooldownTitle.Text    = Loc.Get("GpuCooldownTitle");
             lblGpuCooldownDesc.Text     = Loc.Get("GpuCooldownDesc");
             
-            // Device Manager
-            btnNavDevice.ToolTip        = Loc.Get("NavDeviceManager");
-            lblDeviceManagerHeader.Text = Loc.Get("DeviceManagerHeader");
-            lblDeviceManagerDesc.Text   = Loc.Get("DeviceManagerDesc");
-            btnSaveDevices.Content      = Loc.Get("BtnSaveAndApply");
-            txtSavedDevice.Text         = Loc.Get("SavedSuccess");
+            // Settings Page
+            lblSettingsHeader.Text      = Loc.Get("SettingsHeader");
+            lblSettingsDesc.Text        = Loc.Get("SettingsDesc");
+            lblGeneralSection.Text      = Loc.Get("GeneralSection");
+            lblStartWithWin.Text        = Loc.Get("StartWithWin");
+            lblStartWithWinDesc.Text    = Loc.Get("StartWithWinDesc");
+            lblDesktopWidget.Text       = Loc.Get("DesktopWidget");
+            lblDesktopWidgetDesc.Text   = Loc.Get("DesktopWidgetDesc");
+            lblWidgetProfilesTitle.Text = Loc.Get("WidgetVisibleProfiles");
+            chkWidgetProf1.Content      = Loc.Get("WidgetProfPerformance");
+            chkWidgetProf2.Content      = Loc.Get("WidgetProfGame");
+            chkWidgetProf3.Content      = Loc.Get("WidgetProfInternet");
+            chkWidgetProf4.Content      = Loc.Get("WidgetProfBattery");
+            lblLanguage.Text            = Loc.Get("Language");
+            lblScanInterval.Text        = Loc.Get("ScanInterval");
+            lblScanIntervalDesc.Text    = Loc.Get("ScanIntervalDesc");
+            lblSaveBtn.Text             = Loc.Get("BtnSaveSettings");
 
             // Telemetry
-            btnNavTelemetry.ToolTip     = Loc.Get("NavTelemetry");
             lblTelemetryHeader.Text     = Loc.Get("TelemetryHeader");
             lblTelemetryDesc.Text       = Loc.Get("TelemetryDesc");
             lblFavoritesTitle.Text      = Loc.Get("FavoritesTitle");
             lblLiveGraphTitle.Text      = Loc.Get("LiveGraphTitle");
             txtNoGraphHint.Text         = Loc.Get("NoGraphSensorsHint");
+            lblGraphNow.Text            = Loc.Get("GraphNow");
         }
 
         // ══════════════════════════════════════════════════════════════
