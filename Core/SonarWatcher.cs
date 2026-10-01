@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,6 +39,27 @@ namespace Warden
         private string? _currentPresetId;
         private string? _activeRuleProcess;
 
+        // Ön plan pencere → process adı cache'i: aynı pencere için her tick'te
+        // Process nesnesi + MainModule (modül listesi) sorgusu yapılmaz.
+        private IntPtr _lastHwnd = IntPtr.Zero;
+        private uint _lastPid = 0;
+        private string _lastProcessName = "";
+        private string _lastExeName = "";
+
+        // Kural oyunu arka planda hâlâ çalışıyor mu? (Process.GetProcessesByName pahalı → periyodik kontrol)
+        private bool _activeRuleStillRunning;
+        private DateTime _lastRunningCheckUtc = DateTime.MinValue;
+        private static readonly TimeSpan RunningCheckInterval = TimeSpan.FromSeconds(5);
+
+        // Başarısız preset geçişini tekrar deneme (eskiden pencere değişmeden hiç tekrar denenmiyordu)
+        // GG kapalıyken log'u ve CPU'yu meşgul etmemek için bekleme üstel artar: 5 sn, 10 sn, 20 sn ... en fazla 60 sn
+        private string? _lastFailedPresetId;
+        private int _failStreak = 0;
+        private DateTime _retryAfterUtc = DateTime.MinValue;
+        private static readonly TimeSpan RetryDelayOnError = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan RetryDelayOnRejected = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(60);
+
         // Atomic işlem bayrağı: bool yerine int — Interlocked ile thread-safe
         private int _isProcessing = 0;
 
@@ -74,7 +96,9 @@ namespace Warden
 
         public void Start()
         {
-            _timer = new System.Threading.Timer(async _ => await TickAsync(), null, 0, _intervalMs);
+            _timer?.Dispose();
+            _timer = new System.Threading.Timer(async _ => await TickAsync(), null, 0,
+                Math.Max(AppConfig.MinCheckIntervalMs, _intervalMs));
             _onLog("Watcher started.");
         }
 
@@ -95,6 +119,7 @@ namespace Warden
             {
                 _defaultPresetId = defaultPresetId;
                 _rules = new Dictionary<string, string>(rules, StringComparer.OrdinalIgnoreCase);
+                _lastFailedPresetId = null; // Kural düzeltilmiş olabilir → beklemeden tekrar dene
             }
             _onLog("Config hot-reloaded (watcher devam ediyor).");
         }
@@ -114,43 +139,35 @@ namespace Warden
                 GetWindowThreadProcessId(hwnd, out uint pid);
                 if (pid == 0) return;
 
-                string processName = "";
-                string exeName     = "";
-
-                try
+                if (hwnd != _lastHwnd || pid != _lastPid)
                 {
-                    using var proc = Process.GetProcessById((int)pid);
-                    processName = proc.ProcessName;
-                    exeName     = processName + ".exe";
+                    if (!TryResolveProcess(pid, out string resolvedProcess, out string resolvedExe))
+                        return; // Process kapandı veya erişilemiyor
 
-                    try
-                    {
-                        string? mainModule = proc.MainModule?.ModuleName;
-                        if (!string.IsNullOrEmpty(mainModule))
-                            exeName = mainModule;
-                    }
-                    catch { /* Erişim reddedildi — processName.exe fallback kullan */ }
-                }
-                catch
-                {
-                    return; // Process kapandı veya erişilemiyor
+                    _lastHwnd = hwnd;
+                    _lastPid = pid;
+                    _lastProcessName = resolvedProcess;
+                    _lastExeName = resolvedExe;
                 }
 
-                // Aynı process zaten aktifse yapacak bir şey yok
-                if (exeName.Equals(_currentActiveProcess, StringComparison.OrdinalIgnoreCase))
-                    return;
+                string processName = _lastProcessName;
+                string exeName     = _lastExeName;
 
-                _currentActiveProcess = exeName;
-                _onLog($"Active window changed to: {exeName}");
-                _onActiveWindowChanged?.Invoke(exeName);
+                bool windowChanged = !exeName.Equals(_currentActiveProcess, StringComparison.OrdinalIgnoreCase);
+                if (windowChanged)
+                {
+                    _currentActiveProcess = exeName;
+                    _onLog($"Active window changed to: {exeName}");
+                    _onActiveWindowChanged?.Invoke(exeName);
+                }
 
-                // Thread-safe config snapshot al
+                // Thread-safe config snapshot al (kopyalamadan — UpdateConfig referansı tamamen değiştirir)
                 string defaultPresetId;
                 Dictionary<string, string> rules;
                 lock (_configLock)
                 {
                     defaultPresetId = _defaultPresetId;
-                    rules = new Dictionary<string, string>(_rules, StringComparer.OrdinalIgnoreCase);
+                    rules = _rules;
                 }
 
                 string targetPresetId = defaultPresetId;
@@ -158,39 +175,33 @@ namespace Warden
                 bool foundRuleForForeground = false;
 
                 // 1. Ön plandaki pencere kuralla eşleşiyor mu?
-                foreach (var rule in rules)
+                if (rules.TryGetValue(exeName, out string? fgPreset) ||
+                    rules.TryGetValue(processName, out fgPreset) ||
+                    rules.TryGetValue(processName + ".exe", out fgPreset))
                 {
-                    if (exeName.Equals(rule.Key, StringComparison.OrdinalIgnoreCase) ||
-                        processName.Equals(rule.Key, StringComparison.OrdinalIgnoreCase))
-                    {
-                        targetPresetId = rule.Value;
-                        targetRuleName = rule.Key;
-                        _activeRuleProcess = rule.Key;
-                        foundRuleForForeground = true;
-                        break;
-                    }
+                    targetPresetId = fgPreset;
+                    targetRuleName = rules.Keys.First(k =>
+                        k.Equals(exeName, StringComparison.OrdinalIgnoreCase) ||
+                        k.Equals(processName, StringComparison.OrdinalIgnoreCase) ||
+                        k.Equals(processName + ".exe", StringComparison.OrdinalIgnoreCase));
+                    _activeRuleProcess = targetRuleName;
+                    _activeRuleStillRunning = true;
+                    _lastRunningCheckUtc = DateTime.UtcNow;
+                    foundRuleForForeground = true;
                 }
 
                 // 2. Eşleşme yoksa: önceki aktif oyun hâlâ çalışıyor mu?
+                //    Pencere değiştiğinde hemen, aynı pencerede kalındığında periyodik olarak kontrol edilir;
+                //    böylece masaüstündeyken oyun kapanırsa da varsayılan profile dönülür.
                 if (!foundRuleForForeground && !string.IsNullOrEmpty(_activeRuleProcess))
                 {
-                    bool isStillRunning = false;
-                    try
+                    if (windowChanged || DateTime.UtcNow - _lastRunningCheckUtc >= RunningCheckInterval)
                     {
-                        string checkName = _activeRuleProcess.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-                            ? _activeRuleProcess.Substring(0, _activeRuleProcess.Length - 4)
-                            : _activeRuleProcess;
-
-                        var procs = Process.GetProcessesByName(checkName);
-                        isStillRunning = procs.Length > 0;
-                        for (int i = 0; i < procs.Length; i++)
-                        {
-                            procs[i].Dispose();
-                        }
+                        _activeRuleStillRunning = IsProcessRunning(_activeRuleProcess);
+                        _lastRunningCheckUtc = DateTime.UtcNow;
                     }
-                    catch { }
 
-                    if (isStillRunning && rules.TryGetValue(_activeRuleProcess, out string? rulePreset))
+                    if (_activeRuleStillRunning && rules.TryGetValue(_activeRuleProcess, out string? rulePreset))
                     {
                         // Oyun hâlâ çalışıyor → kuralı korumaya devam et
                         targetPresetId = rulePreset;
@@ -198,7 +209,7 @@ namespace Warden
                     }
                     else
                     {
-                        // Oyun kapandı → varsayılana dön
+                        // Oyun kapandı (veya kural silindi) → varsayılana dön
                         _activeRuleProcess = null;
                         targetPresetId = defaultPresetId;
                         targetRuleName = "Desktop";
@@ -206,11 +217,14 @@ namespace Warden
                 }
 
                 // 3. Gerekiyorsa preset'i değiştir
-                if (_currentPresetId != targetPresetId)
-                {
-                    _onLog($"Switching preset → rule: {targetRuleName} (ID: {targetPresetId})");
-                    await TrySwitchPresetAsync(targetPresetId, targetRuleName);
-                }
+                if (string.IsNullOrWhiteSpace(targetPresetId)) return;   // Hedef tanımlı değil (ör. varsayılan seçilmemiş)
+                if (_currentPresetId == targetPresetId) return;
+
+                // Başarısız olan aynı hedefi her tick'te tekrar deneme; kısa bir bekleme uygula
+                if (targetPresetId == _lastFailedPresetId && DateTime.UtcNow < _retryAfterUtc) return;
+
+                _onLog($"Switching preset → rule: {targetRuleName} (ID: {targetPresetId})");
+                await TrySwitchPresetAsync(targetPresetId, targetRuleName);
             }
             catch (Exception ex)
             {
@@ -220,6 +234,51 @@ namespace Warden
             {
                 // Atomik olarak bayrağı sıfırla
                 Interlocked.Exchange(ref _isProcessing, 0);
+            }
+        }
+
+        private static bool TryResolveProcess(uint pid, out string processName, out string exeName)
+        {
+            processName = "";
+            exeName = "";
+            try
+            {
+                using var proc = Process.GetProcessById((int)pid);
+                processName = proc.ProcessName;
+                exeName     = processName + ".exe";
+
+                try
+                {
+                    string? mainModule = proc.MainModule?.ModuleName;
+                    if (!string.IsNullOrEmpty(mainModule))
+                        exeName = mainModule;
+                }
+                catch { /* Erişim reddedildi — processName.exe fallback kullan */ }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsProcessRunning(string ruleProcess)
+        {
+            try
+            {
+                string checkName = ruleProcess.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                    ? ruleProcess.Substring(0, ruleProcess.Length - 4)
+                    : ruleProcess;
+
+                var procs = Process.GetProcessesByName(checkName);
+                bool running = procs.Length > 0;
+                foreach (var p in procs) p.Dispose();
+                return running;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -234,6 +293,8 @@ namespace Warden
                 if (success)
                 {
                     _currentPresetId = targetPresetId;
+                    _lastFailedPresetId = null;
+                    _failStreak = 0;
                     RegisterSuccess();
 
                     // Cache'de varsa direkt kullan — yoksa API'den al ve cache'e ekle
@@ -254,24 +315,38 @@ namespace Warden
                 }
                 else
                 {
-                    _onLog($"API preset değiştirme başarısız: {targetRuleName}");
+                    // GG yanıt verdi ama preset'i reddetti (ör. silinmiş/geçersiz ID) — bağlantı hatası değil
+                    _onLog($"API preset değiştirme başarısız: {targetRuleName} (ID: {targetPresetId})");
+                    MarkFailed(targetPresetId, RetryDelayOnRejected);
                 }
             }
             catch (System.Net.Http.HttpRequestException ex)
             {
                 _onLog($"HTTP hatası (preset switch): {ex.Message}");
+                MarkFailed(targetPresetId, RetryDelayOnError);
                 RegisterError();
             }
             catch (TaskCanceledException ex)
             {
                 _onLog($"Zaman aşımı (preset switch): {ex.Message}");
+                MarkFailed(targetPresetId, RetryDelayOnError);
                 RegisterError();
             }
             catch (Exception ex)
             {
                 _onLog($"Beklenmedik hata (preset switch): {ex.Message}");
+                MarkFailed(targetPresetId, RetryDelayOnError);
                 RegisterError();
             }
+        }
+
+        private void MarkFailed(string presetId, TimeSpan baseDelay)
+        {
+            _failStreak = presetId == _lastFailedPresetId ? Math.Min(_failStreak + 1, 10) : 1;
+            _lastFailedPresetId = presetId;
+
+            double seconds = baseDelay.TotalSeconds * Math.Pow(2, _failStreak - 1);
+            _retryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(Math.Min(seconds, MaxRetryDelay.TotalSeconds));
         }
 
         // ── Connection Health ─────────────────────────────────────────────

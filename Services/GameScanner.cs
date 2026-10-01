@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -90,9 +90,11 @@ namespace Warden
                         try
                         {
                             string acfContent = File.ReadAllText(acf);
+                            string appId = ExtractVdfValue(acfContent, "appid");
                             string gameName = ExtractVdfValue(acfContent, "name");
                             string installDir = ExtractVdfValue(acfContent, "installdir");
                             if (string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(installDir)) continue;
+                            if (IsSteamNonGame(appId, gameName)) continue;
 
                             string gameFolder = Path.Combine(lib, "common", installDir);
                             if (!Directory.Exists(gameFolder)) continue;
@@ -240,13 +242,15 @@ namespace Warden
 
                             if (string.IsNullOrEmpty(installPath) || !Directory.Exists(installPath)) continue;
 
-                            string? exeName = FindMainExe(installPath, gameId ?? "");
+                            // gameId "Origin.OFR.50.0001234" gibi okunamaz bir kimlik → kurulum klasörü adı daha anlamlı
+                            string folderName = GetFolderDisplayName(installPath);
+                            string? exeName = FindMainExe(installPath, folderName);
                             if (string.IsNullOrEmpty(exeName)) continue;
 
                             results.Add(new DiscoveredGame
                             {
                                 ExeName = exeName,
-                                GameName = gameId ?? exeName,
+                                GameName = string.IsNullOrEmpty(folderName) ? (gameId ?? exeName) : folderName,
                                 Source = "EA"
                             });
                         }
@@ -278,13 +282,14 @@ namespace Warden
                         string? installDir = gameKey.GetValue("InstallDir") as string;
                         if (string.IsNullOrEmpty(installDir) || !Directory.Exists(installDir)) continue;
 
-                        string? exeName = FindMainExe(installDir, "");
+                        string folderName = GetFolderDisplayName(installDir);
+                        string? exeName = FindMainExe(installDir, folderName);
                         if (string.IsNullOrEmpty(exeName)) continue;
 
                         results.Add(new DiscoveredGame
                         {
                             ExeName = exeName,
-                            GameName = exeName.Replace(".exe", ""),
+                            GameName = string.IsNullOrEmpty(folderName) ? Path.GetFileNameWithoutExtension(exeName) : folderName,
                             Source = "Ubisoft"
                         });
                     }
@@ -318,12 +323,11 @@ namespace Warden
 
                         string? exeName = FindMainExe(path, "");
                         if (string.IsNullOrEmpty(exeName)) continue;
-                        if (IsSystemExe(exeName)) continue;
 
                         results.Add(new DiscoveredGame
                         {
                             ExeName = exeName,
-                            GameName = exeName.Replace(".exe", ""),
+                            GameName = Path.GetFileNameWithoutExtension(exeName),
                             Source = "Xbox"
                         });
                     }
@@ -348,7 +352,10 @@ namespace Warden
                     {
                         string gameId = Path.GetFileName(dir);
                         string yamlPath = Path.Combine(dir, $"{gameId}.product_settings.yaml");
-                        if (File.Exists(yamlPath))
+                        if (gameId.StartsWith("Riot Client", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!File.Exists(yamlPath)) continue;
+
+                        try
                         {
                             string content = File.ReadAllText(yamlPath);
                             string installPath = "";
@@ -362,18 +369,20 @@ namespace Warden
                             }
                             if (Directory.Exists(installPath))
                             {
-                                string? exeName = FindMainExe(installPath, "");
+                                string displayName = gameId.Replace(".live", "").Replace("_", " ");
+                                string? exeName = FindMainExe(installPath, displayName);
                                 if (!string.IsNullOrEmpty(exeName))
                                 {
                                     results.Add(new DiscoveredGame
                                     {
                                         ExeName = exeName,
-                                        GameName = gameId.Replace(".live", "").Replace("_", " "),
+                                        GameName = displayName,
                                         Source = "Riot Games"
                                     });
                                 }
                             }
                         }
+                        catch { /* Tek bir bozuk yaml tüm Riot taramasını durdurmasın */ }
                     }
                 }
             }
@@ -383,9 +392,17 @@ namespace Warden
 
         // ─── Helpers ──────────────────────────────────────────────────────────
 
+        // Kurulum klasöründe oyun olmayan exe'lerin bulunduğu alt klasörler
+        private static readonly HashSet<string> IgnoredSubfolders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "_commonredist", "commonredist", "redist", "redists", "redistributable", "redistributables",
+            "directx", "vcredist", "dotnet", "support", "installer", "installers", "__installer",
+            "prereqs", "prerequisites", "easyanticheat", "battleye", "eac", "crashreporter", "tools"
+        };
+
         /// <summary>
-        /// Find the main game executable in a folder. Prefers the largest .exe at root level,
-        /// filtering out common non-game executables.
+        /// Find the main game executable in a folder. Prefers an exe whose name matches the game name,
+        /// otherwise the largest exe, filtering out common non-game executables and redist folders.
         /// </summary>
         private static string? FindMainExe(string folder, string gameName)
         {
@@ -397,65 +414,149 @@ namespace Warden
                     RecurseSubdirectories = true,
                     MaxRecursionDepth = 4
                 };
-                
-                var exes = Directory.GetFiles(folder, "*.exe", options)
-                    .Where(f => !IsSystemExe(Path.GetFileName(f)))
-                    .OrderByDescending(f => new FileInfo(f).Length)
+
+                var exes = Directory.EnumerateFiles(folder, "*.exe", options)
+                    .Where(f => !IsSystemExe(Path.GetFileName(f)) && !IsInIgnoredSubfolder(folder, f))
+                    .Select(f => (Path: f, Size: SafeLength(f)))
+                    .OrderByDescending(x => x.Size)
+                    .Select(x => x.Path)
                     .ToList();
 
-                // If game name provided, try to find an exe that matches the name
-                if (!string.IsNullOrEmpty(gameName))
-                {
-                    string cleanName = gameName.ToLower()
-                        .Replace(" ", "").Replace(":", "").Replace("-", "").Replace("'", "");
+                if (exes.Count == 0) return null;
 
+                // If game name provided, try to find an exe that matches the name
+                string cleanName = NormalizeForMatch(gameName);
+                if (cleanName.Length >= 3)
+                {
                     var nameMatch = exes.FirstOrDefault(e =>
                     {
-                        string en = Path.GetFileNameWithoutExtension(e).ToLower()
-                            .Replace(" ", "").Replace("_", "").Replace("-", "");
-                        return en.Contains(cleanName) || cleanName.Contains(en);
+                        string en = NormalizeForMatch(Path.GetFileNameWithoutExtension(e));
+                        // Çok kısa exe adları ("a", "go") her oyun adının içinde geçebilir → en az 4 karakter şartı
+                        return en.Length > 0 &&
+                               (en.Contains(cleanName) || (en.Length >= 4 && cleanName.Contains(en)));
                     });
 
                     if (nameMatch != null) return Path.GetFileName(nameMatch);
                 }
 
-                return exes.Any() ? Path.GetFileName(exes[0]) : null;
+                return Path.GetFileName(exes[0]);
             }
             catch { return null; }
         }
 
+        private static long SafeLength(string file)
+        {
+            try { return new FileInfo(file).Length; }
+            catch { return 0; }
+        }
+
+        private static string NormalizeForMatch(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            return new string(text.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        }
+
+        private static bool IsInIgnoredSubfolder(string root, string file)
+        {
+            string? dir = Path.GetDirectoryName(file);
+            if (string.IsNullOrEmpty(dir)) return false;
+
+            string relative = Path.GetRelativePath(root, dir);
+            if (relative == ".") return false;
+
+            foreach (var segment in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            {
+                if (IgnoredSubfolders.Contains(segment)) return true;
+            }
+            return false;
+        }
+
+        private static string GetFolderDisplayName(string path)
+        {
+            try
+            {
+                return Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            }
+            catch { return ""; }
+        }
+
+        private static bool IsSteamNonGame(string appId, string name)
+        {
+            // 228980 = Steamworks Common Redistributables; Proton / Linux Runtime gibi araçlar da oyun değildir
+            if (appId == "228980") return true;
+            return name.Contains("Redistributable", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("Proton", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("Steam Linux Runtime", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("SteamVR", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Exe adının herhangi bir yerinde geçmesi güvenli olan (oyun adlarında pratikte geçmeyen) parçalar
+        private static readonly string[] SystemExeSubstrings =
+        {
+            "unins", "setup", "install", "redist", "dxsetup", "oalinst", "prereq",
+            "crashhandler", "crashreport", "crashpad", "crashsender", "bugreport", "errorreport",
+            "easyanticheat", "battleye", "beservice", "anticheat", "launcher", "updater", "patcher",
+            "helper", "physx", "dotnet", "cefprocess", "cefsharp", "qtwebengine", "webview",
+            "benchmark", "configurator", "service", "daemon", "touchup", "cleanup", "repair",
+            "diagnos", "mapeditor", "worldeditor", "leveleditor", "dedicated", "overlay", "inject",
+            "notification", "uploader", "downloader"
+        };
+
+        // CamelCase kelime / ayraç parçası olarak tam eşleştiğinde eleme yapılan kelimeler.
+        // Eskiden tüm liste alt-dize olarak aranıyordu ve gerçek oyunları eliyordu:
+        // "origin" → ACOrigins.exe, "mod" → ModernWarfare.exe, "word" → Swordsman.exe,
+        // "edge" → MirrorsEdge.exe, "eac" → Peacemaker.exe, "test" → TestDriveUnlimited.exe ...
+        private static readonly HashSet<string> SystemExeTokens = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "update", "patch", "report", "reporter", "support", "tool", "tools", "config",
+            "uninstall", "debug", "compiler", "server", "editor", "sdk", "devkit", "mod", "mods",
+            "cef", "qt5", "qt6", "xna", "eac", "msvc", "msvcp", "msvcr", "vcredist",
+            "steamwebhelper", "galaxyclient", "eadesktop", "ubisoftconnect", "epicgames", "epicgameslauncher",
+            "python", "pythonw", "java", "javaw", "jre", "jdk",
+            "nvidia", "amd", "intel", "geforce", "radeon", "microsoft",
+            "chrome", "firefox", "msedge", "opera", "browser",
+            "discord", "slack", "skype", "telegram", "spotify", "vlc",
+            "winword", "excel", "outlook", "onenote", "powerpnt", "adobe", "acrobat", "photoshop",
+            "antivirus", "malware", "defender", "firewall",
+            "7z", "7zg", "7zfm", "winrar", "unrar", "unzip", "notepad", "mspaint", "powershell", "conhost"
+        };
+
+        // Oyun adlarının içinde kelime olarak geçebilecek genel kelimeler: yalnızca exe adının tamamı
+        // (veya '-', '_', ' ' ile ayrılmış bir parçası) bu kelimeyse elenir. Ör. "Steam.exe" elenir,
+        // "SteamWorldDig.exe" / "CrashBandicoot.exe" / "AgentOfMayhem.exe" elenmez.
+        private static readonly HashSet<string> SystemExeExactNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "steam", "origin", "gog", "upc", "ubisoft", "crash", "test", "build", "compile", "register",
+            "remove", "repair", "hook", "agent", "tray", "node", "ruby", "brave", "teams", "zoom",
+            "media", "player", "photo", "image", "office", "archive", "zip", "calc", "cmd", "vc", "be"
+        };
+
+        private static readonly System.Text.RegularExpressions.Regex TokenRegex =
+            new(@"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
         private static bool IsSystemExe(string exeName)
         {
-            string lower = exeName.ToLower();
+            string baseName = Path.GetFileNameWithoutExtension(exeName);
+            string lower = baseName.ToLowerInvariant();
 
-            // Partial-match blacklist — any exe whose name contains these words is not a game
-            string[] partials = {
-                "unins", "setup", "install", "update", "updater", "patcher", "patch",
-                "launcher", "crash", "report", "helper", "support", "tool", "tools",
-                "vc_redist", "dxsetup", "oalinst", "dotnet", "redistrib", "vcredist",
-                "physx", "easyanticheat", "battleye", "beclient", "beclauncher",
-                "steam", "galaxyclient", "gog", "origin", "eadesktop", "ubisoft",
-                "ubilauncher", "epicgames", "service", "daemon", "tray", "agent",
-                "cef", "qt5", "qt6", "directx", "d3d", "openal", "xna", "msvc",
-                "msvcp", "msvcr", "python", "node", "java", "jre", "jdk", "ruby",
-                "register", "config", "configurator", "benchmark", "diag", "diagnos",
-                "repair", "remove", "uninstall", "cleanup", "cleaner", "anticheat",
-                "eac", "be_", "inject", "overlay", "hook", "mod", "editor",
-                "sdk", "devkit", "compile", "build", "test", "debug", "server",
-                "dedicated", "mapeditor", "worldeditor", "leveleditor",
-                "nvidia", "amd", "intel", "geforce", "radeon",
-                "microsoft", "windows", "system32", "syswow",
-                "chrome", "firefox", "edge", "opera", "brave", "browser",
-                "discord", "slack", "teams", "zoom", "skype", "telegram",
-                "spotify", "vlc", "media", "player", "photo", "image",
-                "office", "word", "excel", "outlook", "onenote", "powerpoint",
-                "adobe", "acrobat", "photoshop", "illustrator",
-                "antivirus", "malware", "defender", "firewall",
-                "7z", "winrar", "zip", "archive",
-                "notepad", "calc", "paint", "mspaint"
-            };
+            foreach (var part in SystemExeSubstrings)
+            {
+                if (lower.Contains(part)) return true;
+            }
 
-            return partials.Any(p => lower.Contains(p));
+            if (SystemExeTokens.Contains(lower) || SystemExeExactNames.Contains(lower)) return true;
+
+            foreach (var piece in baseName.Split(new[] { ' ', '_', '-', '.' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (SystemExeTokens.Contains(piece) || SystemExeExactNames.Contains(piece)) return true;
+
+                foreach (System.Text.RegularExpressions.Match m in TokenRegex.Matches(piece))
+                {
+                    if (SystemExeTokens.Contains(m.Value)) return true;
+                }
+            }
+
+            return false;
         }
 
         private static string ExtractVdfValue(string content, string key)

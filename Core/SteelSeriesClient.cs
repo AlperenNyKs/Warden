@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -16,6 +16,7 @@ namespace Warden
         // FileSystemWatcher: GG güncellenince coreProps.json değişir → adresi sıfırla
         private FileSystemWatcher? _corePropsWatcher;
         private CancellationTokenSource? _debounceCts;
+        private readonly object _debounceLock = new();
 
         private const int RetryCount = 3;
         private const int BaseRetryDelayMs = 1000; // 1s, 2s (exponential)
@@ -24,7 +25,11 @@ namespace Warden
         {
             var handler = new HttpClientHandler
             {
-                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+                // GG yerel sunucusu self-signed sertifika kullanır. Sertifika hatasını yalnızca
+                // loopback (127.0.0.1 / localhost) adresleri için yok say; dış adreslerde normal doğrulama.
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+                    errors == System.Net.Security.SslPolicyErrors.None ||
+                    (message.RequestUri?.IsLoopback ?? false)
             };
             _httpClient = new HttpClient(handler)
             {
@@ -57,11 +62,16 @@ namespace Warden
 
         private void OnCorePropsChanged(object sender, FileSystemEventArgs e)
         {
-            // GG güncelleme sırasında dosyayı birden fazla kez yazabilir → debounce
-            _debounceCts?.Cancel();
-            _debounceCts?.Dispose();
-            _debounceCts = new CancellationTokenSource();
-            var token = _debounceCts.Token;
+            // GG güncelleme sırasında dosyayı birden fazla kez yazabilir → debounce.
+            // FileSystemWatcher olayları farklı thread'lerden eşzamanlı gelebilir; CTS değişimi kilitli yapılır.
+            CancellationToken token;
+            lock (_debounceLock)
+            {
+                _debounceCts?.Cancel();
+                _debounceCts?.Dispose();
+                _debounceCts = new CancellationTokenSource();
+                token = _debounceCts.Token;
+            }
 
             Task.Delay(2000, token).ContinueWith(t =>
             {
@@ -74,10 +84,11 @@ namespace Warden
 
         public string GetCorePropsPath()
         {
+            string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             string[] possiblePaths =
             {
-                @"C:\ProgramData\SteelSeries\GG\coreProps.json",
-                @"C:\ProgramData\SteelSeries\SteelSeries Engine 3\coreProps.json"
+                Path.Combine(programData, "SteelSeries", "GG", "coreProps.json"),
+                Path.Combine(programData, "SteelSeries", "SteelSeries Engine 3", "coreProps.json")
             };
 
             foreach (var path in possiblePaths)
@@ -98,8 +109,10 @@ namespace Warden
 
         public async Task<string> GetSonarAddressAsync()
         {
-            if (!string.IsNullOrEmpty(_sonarAddress))
-                return _sonarAddress;
+            // Alan başka thread'den sıfırlanabilir → yerel kopya üzerinden kontrol et
+            string? cached = _sonarAddress;
+            if (!string.IsNullOrEmpty(cached))
+                return cached;
 
             Exception? lastException = null;
 
@@ -114,8 +127,11 @@ namespace Warden
 
                 try
                 {
-                    await ReadSonarAddressAsync();
-                    return _sonarAddress!;
+                    // Değer doğrudan döndürülür: okuma ile return arasında başka bir thread ResetAddress()
+                    // çağırırsa alan null olabiliyordu.
+                    string address = await ReadSonarAddressAsync();
+                    _sonarAddress = address;
+                    return address;
                 }
                 catch (Exception ex)
                 {
@@ -131,9 +147,9 @@ namespace Warden
 
         /// <summary>
         /// coreProps.json → /subApps → webServerAddress zincirini gerçekleştirir.
-        /// Başarılı olursa _sonarAddress'i doldurur.
+        /// Başarılı olursa Sonar web sunucusu adresini döndürür.
         /// </summary>
-        private async Task ReadSonarAddressAsync()
+        private async Task<string> ReadSonarAddressAsync()
         {
             string corePropsPath = GetCorePropsPath();
             string jsonContent   = await File.ReadAllTextAsync(corePropsPath);
@@ -141,17 +157,23 @@ namespace Warden
             using var doc  = JsonDocument.Parse(jsonContent);
             var root = doc.RootElement;
 
+            // ggEncryptedAddress HTTPS (self-signed) portudur; eski sürümlerdeki "address" ise düz HTTP'dir.
+            // Eskiden ikisine de https:// ile gidiliyordu ve "address" yedeği hiç çalışmıyordu.
             string ggAddress = "";
+            string scheme = "https";
             if (root.TryGetProperty("ggEncryptedAddress", out var ggAddrProp))
                 ggAddress = ggAddrProp.GetString() ?? "";
-            else if (root.TryGetProperty("address", out var addrProp))
+            if (string.IsNullOrEmpty(ggAddress) && root.TryGetProperty("address", out var addrProp))
+            {
                 ggAddress = addrProp.GetString() ?? "";
+                scheme = "http";
+            }
 
             if (string.IsNullOrEmpty(ggAddress))
                 throw new Exception("coreProps.json içinde geçerli bir API adresi bulunamadı.");
 
-            string subAppsUrl = $"https://{ggAddress}/subApps";
-            HttpResponseMessage response = await _httpClient.GetAsync(subAppsUrl);
+            string subAppsUrl = $"{scheme}://{ggAddress}/subApps";
+            using HttpResponseMessage response = await _httpClient.GetAsync(subAppsUrl);
             response.EnsureSuccessStatusCode();
 
             string subAppsJson = await response.Content.ReadAsStringAsync();
@@ -177,11 +199,12 @@ namespace Warden
 
             if (sonarMetadata.TryGetProperty("webServerAddress", out var webServerAddressProp))
             {
-                string webAddr = webServerAddressProp.GetString() ?? "";
+                string webAddr = (webServerAddressProp.GetString() ?? "").TrimEnd('/');
+                if (string.IsNullOrWhiteSpace(webAddr))
+                    throw new Exception("Sonar webServerAddress boş (Sonar kapalı olabilir).");
                 if (!webAddr.StartsWith("http://") && !webAddr.StartsWith("https://"))
                     webAddr = $"http://{webAddr}";
-                _sonarAddress = webAddr;
-                return;
+                return webAddr;
             }
 
             throw new Exception("Sonar metadata içinde webServerAddress bulunamadı.");
@@ -194,22 +217,30 @@ namespace Warden
             string baseAddress = await GetSonarAddressAsync();
             string url = $"{baseAddress}/configs";
 
-            HttpResponseMessage response = await _httpClient.GetAsync(url);
-            response.EnsureSuccessStatusCode();
-
-            return await response.Content.ReadAsStringAsync();
+            try
+            {
+                using HttpResponseMessage response = await _httpClient.GetAsync(url);
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadAsStringAsync();
+            }
+            catch (HttpRequestException)
+            {
+                // Sonar yeniden başlatılmış ve port değişmiş olabilir → bir sonraki çağrıda yeniden çözümle
+                _sonarAddress = null;
+                throw;
+            }
         }
 
         public async Task<bool> SetPresetAsync(string presetId)
         {
             string baseAddress = await GetSonarAddressAsync();
-            string url = $"{baseAddress}/configs/{presetId}/select";
+            string url = $"{baseAddress}/configs/{Uri.EscapeDataString(presetId)}/select";
 
-            var content = new StringContent("", Encoding.UTF8, "application/json");
+            using var content = new StringContent("", Encoding.UTF8, "application/json");
 
             try
             {
-                HttpResponseMessage response = await _httpClient.PutAsync(url, content);
+                using HttpResponseMessage response = await _httpClient.PutAsync(url, content);
                 return response.IsSuccessStatusCode;
             }
             catch
@@ -243,12 +274,16 @@ namespace Warden
                     string name   = "";
                     string device = "";
 
-                    if (item.TryGetProperty("id",   out var idProp))   id   = idProp.GetString()   ?? "";
-                    if (item.TryGetProperty("name", out var nameProp)) name = nameProp.GetString() ?? "";
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+
+                    if (item.TryGetProperty("id",   out var idProp))   id   = AsString(idProp);
+                    if (item.TryGetProperty("name", out var nameProp)) name = AsString(nameProp);
                     if (string.IsNullOrEmpty(id) && item.TryGetProperty("uuid", out var uuidProp))
-                        id = uuidProp.GetString() ?? "";
+                        id = AsString(uuidProp);
                     if (item.TryGetProperty("virtualAudioDevice", out var devProp))
-                        device = devProp.GetString() ?? "";
+                        device = AsString(devProp);
+
+                    if (string.IsNullOrEmpty(id)) continue;
 
                     list.Add(new SonarConfig { id = id, name = name, virtualAudioDevice = device });
                 }
@@ -256,13 +291,25 @@ namespace Warden
             return list;
         }
 
+        /// <summary>JSON değeri string değilse (ör. sayı) GetString() exception fırlatır; güvenli dönüşüm.</summary>
+        private static string AsString(JsonElement e) => e.ValueKind switch
+        {
+            JsonValueKind.String => e.GetString() ?? "",
+            JsonValueKind.Null or JsonValueKind.Undefined => "",
+            _ => e.GetRawText()
+        };
+
         // ── IDisposable ───────────────────────────────────────────────────
 
         public void Dispose()
         {
             _corePropsWatcher?.Dispose();
-            _debounceCts?.Cancel();
-            _debounceCts?.Dispose();
+            lock (_debounceLock)
+            {
+                _debounceCts?.Cancel();
+                _debounceCts?.Dispose();
+                _debounceCts = null;
+            }
             _httpClient.Dispose();
         }
     }

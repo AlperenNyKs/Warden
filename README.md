@@ -33,7 +33,7 @@ Warden integrates directly with:
 
 1. Build or download the latest release.
 2. Run **`Warden.exe`**.
-3. Warden will minimize to your system tray. Double-click the tray icon to open the dashboard.
+3. Warden will minimize to your system tray. Click the tray icon to open the dashboard.
 
 *To build from source:*
 ```bash

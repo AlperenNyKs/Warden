@@ -20,6 +20,21 @@ namespace Warden
         {
             this.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+            // Global crash logging en başta kurulur (başlangıç adımlarındaki hatalar da loglansın)
+            AppDomain.CurrentDomain.UnhandledException += (s, ev) => LogCrash("AppDomain", ev.ExceptionObject as Exception);
+            this.DispatcherUnhandledException += (s, ev) => { LogCrash("Dispatcher", ev.Exception); ev.Handled = true; };
+            TaskScheduler.UnobservedTaskException += (s, ev) => { LogCrash("TaskScheduler", ev.Exception); ev.SetObserved(); };
+
+            // 0. CLI modu (--discover): tek-örnek kontrolünden ÖNCE işlenir. Eskiden Warden tepside açıkken
+            //    "Warden.exe --discover" çalıştırıldığında yalnızca mevcut pencere öne getiriliyor, keşif yapılmıyordu.
+            if (e.Args.Length > 0 && (e.Args[0] == "--discover" || e.Args[0] == "-d"))
+            {
+                try { await DiscoverPresetsCliAsync(); }
+                catch (Exception ex) { LogCrash("CLI", ex); }
+                this.Shutdown();
+                return;
+            }
+
             // 1. Single Instance Check (Tek uygulama çalışmasını garantile)
             const string mutexName = "Global\\Warden_SingleInstance";
             const string eventName = "Global\\Warden_WakeupEvent";
@@ -87,21 +102,9 @@ namespace Warden
 
             base.OnStartup(e);
 
-            // 2. Set up global crash logging
-            AppDomain.CurrentDomain.UnhandledException += (s, ev) => LogCrash("AppDomain", ev.ExceptionObject as Exception);
-            this.DispatcherUnhandledException += (s, ev) => { LogCrash("Dispatcher", ev.Exception); ev.Handled = true; };
-            TaskScheduler.UnobservedTaskException += (s, ev) => { LogCrash("TaskScheduler", ev.Exception); ev.SetObserved(); };
 
             try
             {
-                // Handle CLI arguments
-                if (e.Args.Length > 0 && (e.Args[0] == "--discover" || e.Args[0] == "-d"))
-                {
-                    await DiscoverPresetsCliAsync();
-                    this.Shutdown();
-                    return;
-                }
-
                 // Start Tray and Watcher
                 _trayContext = new TrayApplicationContext(this);
             }
@@ -119,7 +122,19 @@ namespace Warden
             }
         }
 
+        private static readonly object CrashLogLock = new();
+
         private void LogCrash(string source, Exception? ex)
+        {
+            // Crash handler'ın kendisi asla exception fırlatmamalı (aksi halde asıl hata da kaybolur)
+            try
+            {
+                lock (CrashLogLock) WriteCrashLog(source, ex);
+            }
+            catch { }
+        }
+
+        private static void WriteCrashLog(string source, Exception? ex)
         {
             string logDir  = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Warden", "logs");
             Directory.CreateDirectory(logDir);
@@ -137,14 +152,8 @@ namespace Warden
             }
             catch { }
 
-            string message = $"[{DateTime.Now}] CRASH in {source}: {ex?.ToString() ?? "No exception details"}{Environment.NewLine}";
-            Exception? inner = ex;
-            while (inner != null)
-            {
-                message += $"INNER: {inner.Message}\n";
-                inner = inner.InnerException;
-            }
-            message += Environment.NewLine;
+            // ex.ToString() iç exception'ları da içerir; ayrıca tekrar eklemeye gerek yok
+            string message = $"[{DateTime.Now}] CRASH in {source}: {ex?.ToString() ?? "No exception details"}{Environment.NewLine}{Environment.NewLine}";
 
             try { File.AppendAllText(logPath, message); } catch { }
             // MessageBox kaldırıldı — crash tray notification veya log dosyasından görülür
@@ -166,7 +175,7 @@ namespace Warden
             
             try
             {
-                var client = new SteelSeriesClient();
+                using var client = new SteelSeriesClient();
                 Console.WriteLine("Finding SteelSeries GG API port...");
                 string address = await client.GetSonarAddressAsync();
                 Console.WriteLine($"Sonar Web Server found at: {address}");

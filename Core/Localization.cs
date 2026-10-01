@@ -133,7 +133,38 @@ namespace Warden
                     { "WidgetLockTooltip",      "Lock / Move Position" },
                     { "WidgetStartTS",          "⚡ Launch ThrottleStop" },
                     { "WidgetOpenWarden",       "⚙️ Warden Settings (Profile Selection)" },
-                    { "WidgetHide",             "❌ Hide Widget" }
+                    { "WidgetHide",             "❌ Hide Widget" },
+
+                    // Notifications, telemetry sensor names & ThrottleStop location
+                    { "Scanning", "Scanning..." },
+                    { "ProfileN", "Profile {0}" },
+                    { "SecondsN", "{0} Seconds" },
+                    { "PresetSwitched", "Preset switched: {0} → {1}" },
+                    { "GpuProfileApplied", "Core clock reached {0} MHz. Profile {1} applied." },
+                    { "ConnLost", "SteelSeries GG connection lost. Trying to reconnect..." },
+                    { "ConnRestored", "SteelSeries GG connection restored." },
+                    { "ConfigCorrupt", "config.json could not be read. A backup was saved and default settings were loaded." },
+                    { "SensorGpuTemp", "GPU Temperature" },
+                    { "SensorGpuHotSpot", "GPU Hot Spot Temperature" },
+                    { "SensorGpuPower", "GPU Power (Watt)" },
+                    { "SensorGpuCoreClock", "GPU Core Clock (MHz)" },
+                    { "SensorGpuMemClock", "GPU Memory Clock (MHz)" },
+                    { "SensorGpuLoad", "GPU Usage (%)" },
+                    { "SensorCpuTemp", "CPU Package Temperature" },
+                    { "SensorCpuPower", "CPU Power (Watt)" },
+                    { "SensorCpuClock", "CPU Clock (MHz)" },
+                    { "SensorCpuLoad", "CPU Total Usage (%)" },
+                    { "SensorSystemTemp", "System Temperature" },
+                    { "SensorChipset", "Chipset" },
+                    { "SensorVrm", "VRM MOS Temperature" },
+                    { "SensorMemLoad", "Memory Usage (%)" },
+                    { "SensorMemUsed", "Used Memory" },
+                    { "TsPath", "ThrottleStop Location" },
+                    { "TsPathDesc", "Path of ThrottleStop.exe. Leave empty to detect automatically." },
+                    { "TsPathFound", "✔ Using: {0}" },
+                    { "TsPathNotFound", "⚠ ThrottleStop not found — please select ThrottleStop.exe" },
+                    { "TsPathInvalid", "⚠ File not found or not an .exe: {0}" },
+                    { "TsBrowseTitle", "Select ThrottleStop.exe" }
                 }
             },
             {
@@ -261,10 +292,45 @@ namespace Warden
                     { "WidgetLockTooltip",      "Konumu Kilitle / Taşı" },
                     { "WidgetStartTS",          "⚡ ThrottleStop'u Başlat" },
                     { "WidgetOpenWarden",       "⚙️ Warden Ayarları (Profil Seçimi)" },
-                    { "WidgetHide",             "❌ Widget'ı Gizle" }
+                    { "WidgetHide",             "❌ Widget'ı Gizle" },
+
+                    // Notifications, telemetry sensor names & ThrottleStop location
+                    { "Scanning", "Taranıyor..." },
+                    { "ProfileN", "Profil {0}" },
+                    { "SecondsN", "{0} Saniye" },
+                    { "PresetSwitched", "Profil değişti: {0} → {1}" },
+                    { "GpuProfileApplied", "Çekirdek hızı {0} MHz'e ulaştı. Profil {1} uygulandı." },
+                    { "ConnLost", "SteelSeries GG bağlantısı kesildi. Yeniden bağlanmaya çalışıyor..." },
+                    { "ConnRestored", "SteelSeries GG bağlantısı yeniden kuruldu." },
+                    { "ConfigCorrupt", "config.json okunamadı. Yedeği alındı ve varsayılan ayarlar yüklendi." },
+                    { "SensorGpuTemp", "GPU Sıcaklığı" },
+                    { "SensorGpuHotSpot", "GPU Hot Spot Sıcaklığı" },
+                    { "SensorGpuPower", "GPU Güç Tüketimi (Watt)" },
+                    { "SensorGpuCoreClock", "GPU Çekirdek Hızı (MHz)" },
+                    { "SensorGpuMemClock", "GPU Bellek Hızı (MHz)" },
+                    { "SensorGpuLoad", "GPU Kullanımı (%)" },
+                    { "SensorCpuTemp", "CPU Paket Sıcaklığı" },
+                    { "SensorCpuPower", "CPU Güç Tüketimi (Watt)" },
+                    { "SensorCpuClock", "CPU Saat Hızı (MHz)" },
+                    { "SensorCpuLoad", "CPU Toplam Kullanım (%)" },
+                    { "SensorSystemTemp", "Sistem Sıcaklığı" },
+                    { "SensorChipset", "Yonga Seti (Chipset)" },
+                    { "SensorVrm", "VRM MOS Sıcaklığı" },
+                    { "SensorMemLoad", "Bellek Kullanımı (%)" },
+                    { "SensorMemUsed", "Kullanılan Bellek" },
+                    { "TsPath", "ThrottleStop Konumu" },
+                    { "TsPathDesc", "ThrottleStop.exe dosyasının yolu. Boş bırakılırsa otomatik aranır." },
+                    { "TsPathFound", "✔ Kullanılan: {0}" },
+                    { "TsPathNotFound", "⚠ ThrottleStop bulunamadı — lütfen ThrottleStop.exe dosyasını seçin" },
+                    { "TsPathInvalid", "⚠ Dosya bulunamadı veya .exe değil: {0}" },
+                    { "TsBrowseTitle", "ThrottleStop.exe dosyasını seçin" }
                 }
             }
         };
+
+        /// <summary>Yerelleştirilmiş metni string.Format ile doldurur.</summary>
+        public static string Format(string key, params object[] args)
+            => string.Format(Get(key), args);
 
         public static string Get(string key)
         {
