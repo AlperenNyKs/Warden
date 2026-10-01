@@ -427,7 +427,7 @@
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="6" Height="6" Fill="{StaticResource Accent}" Margin="0,0,5,0"
                                      VerticalAlignment="Center"/>
-                            <TextBlock Text="ONLINE" Foreground="{StaticResource Accent}"
+                            <TextBlock x:Name="txtOnlineBadge" Text="ONLINE" Foreground="{StaticResource Accent}"
                                        FontSize="9" FontWeight="Bold" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
@@ -436,17 +436,17 @@
                 <!-- Right Standard Windows 11 Buttons -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <!-- Minimize -->
-                    <Button x:Name="btnTitleMinimize" Style="{StaticResource Win11TitleButton}" Click="MinimizeButton_Click" ToolTip="Küçült">
+                    <Button x:Name="btnMinimizeTitle" Style="{StaticResource Win11TitleButton}" Click="MinimizeButton_Click" ToolTip="Küçült">
                         <Path Stroke="{StaticResource TxtSecond}" StrokeThickness="1.2"
                               Data="M 0,5 L 10,5" Width="10" Height="10"/>
                     </Button>
                     <!-- Maximize -->
-                    <Button x:Name="btnTitleMaximize" Style="{StaticResource Win11TitleButton}" Click="MaximizeButton_Click" ToolTip="Büyüt">
+                    <Button x:Name="btnMaximizeTitle" Style="{StaticResource Win11TitleButton}" Click="MaximizeButton_Click" ToolTip="Büyüt">
                         <Path Stroke="{StaticResource TxtSecond}" StrokeThickness="1.2"
                               Data="M 0,0 L 10,0 L 10,10 L 0,10 Z" Width="10" Height="10"/>
                     </Button>
                     <!-- Close / Hide to Tray -->
-                    <Button x:Name="btnTitleClose" Style="{StaticResource Win11CloseButton}" Click="CloseButton_Click" ToolTip="Kapat (Tepside çalışır)">
+                    <Button x:Name="btnCloseTitle" Style="{StaticResource Win11CloseButton}" Click="CloseButton_Click" ToolTip="Kapat (Tepside çalışır)">
                         <Path Stroke="{StaticResource TxtSecond}" StrokeThickness="1.2"
                               Data="M 0,0 L 9,9 M 0,9 L 9,0" Width="9" Height="9"/>
                     </Button>
@@ -569,7 +569,7 @@
                                 <TextBlock x:Name="lblPageHeader" Text="Otomatik Geçiş Profilleri"
                                            Foreground="{StaticResource TxtPrimary}"
                                            FontSize="22" FontWeight="Bold"/>
-                                <TextBlock x:Name="lblProfilesDesc" Text="Oyun ve uygulamalara göre SteelSeries Sonar profillerini otomatik değiştirir."
+                                <TextBlock x:Name="lblPageDesc" Text="Oyun ve uygulamalara göre SteelSeries Sonar profillerini otomatik değiştirir."
                                            Foreground="{StaticResource TxtSecond}"
                                            FontSize="12" Margin="0,4,0,0"/>
                             </StackPanel>
@@ -591,7 +591,7 @@
                                         <TextBlock x:Name="lblDefaultConfig" Text="Varsayılan Profil:"
                                                    Foreground="{StaticResource TxtPrimary}"
                                                    FontWeight="Bold" FontSize="13.5"/>
-                                        <TextBlock x:Name="lblDefaultEQDesc" Text="Hiçbir kural eşleşmediğinde veya masaüstündeyken kullanılır."
+                                        <TextBlock x:Name="lblDefaultConfigDesc" Text="Hiçbir kural eşleşmediğinde veya masaüstündeyken kullanılır."
                                                    Foreground="{StaticResource TxtSecond}"
                                                    FontSize="11.5" Margin="0,3,0,0"/>
                                     </StackPanel>
@@ -622,7 +622,7 @@
                                         <TextBlock x:Name="lblPerApp" Text="UYGULAMA / OYUN"
                                                    Foreground="{StaticResource TxtSecond}"
                                                    FontSize="10" FontWeight="Bold"/>
-                                        <TextBlock x:Name="lblColPreset" Grid.Column="2" Text="HEDEF SONAR PROFİLİ"
+                                        <TextBlock x:Name="lblTargetPresetHeader" Grid.Column="2" Text="HEDEF SONAR PROFİLİ"
                                                    Foreground="{StaticResource TxtSecond}"
                                                    FontSize="10" FontWeight="Bold"/>
                                     </Grid>
@@ -1131,7 +1131,7 @@
                                                 <TextBlock Text="-45s" Foreground="{StaticResource TxtMuted}" FontSize="9" HorizontalAlignment="Left" Margin="100,0,0,0"/>
                                                 <TextBlock Text="-30s" Foreground="{StaticResource TxtMuted}" FontSize="9" HorizontalAlignment="Center"/>
                                                 <TextBlock Text="-15s" Foreground="{StaticResource TxtMuted}" FontSize="9" HorizontalAlignment="Right" Margin="0,0,100,0"/>
-                                                <TextBlock x:Name="lblChartNow" Text="Şimdi" Foreground="{StaticResource Accent}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Right"/>
+                                                <TextBlock x:Name="lblGraphNow" Text="Şimdi" Foreground="{StaticResource Accent}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Right"/>
                                             </Grid>
                                         </StackPanel>
                                     </Border>

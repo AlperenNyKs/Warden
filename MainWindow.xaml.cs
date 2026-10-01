@@ -461,7 +461,8 @@ namespace Warden
                 Style = (Style)FindResource("DangerButton"),
                 Padding = new Thickness(10, 5, 10, 5),
                 Margin = new Thickness(12, 0, 0, 0),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                ToolTip = Loc.Get("BtnDeleteRule")
             };
             btnDel.Click += (s, e) =>
             {
@@ -559,7 +560,8 @@ namespace Warden
                 Style = (Style)FindResource("AccentButton"),
                 Padding = new Thickness(10, 5, 10, 5),
                 Margin = new Thickness(12, 0, 0, 0),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                ToolTip = Loc.Get("BtnAddRule")
             };
 
             Action addRule = () =>
@@ -930,11 +932,12 @@ namespace Warden
 
                 if (changed && IsLoaded)
                 {
-                    // Dinamik oluşturulan satırlar ve sensör adları da yeni dile geçsin
+                    // Dinamik oluşturulan satırlar, sensör adları, tepsi menüsü ve widget da yeni dile geçsin
                     RenderRulesList();
                     _lastCategoryStructureKey = "";
                     _lastFavoritesKey = "";
-                    _context.ApplyLanguageToWidget();
+                    _context.UpdateTrayMenu();
+                    _context.UpdateDesktopWidgetLanguage();
                 }
             }
         }
@@ -946,7 +949,7 @@ namespace Warden
             // Brief feedback on button
             lblSaveBtn.Text = Loc.Get("SavedSuccess");
             await Task.Delay(1500);
-            lblSaveBtn.Text = Loc.Get("BtnSave");
+            lblSaveBtn.Text = Loc.Get("BtnSaveSettings");
         }
 
         private void BtnClearGames_Click(object sender, RoutedEventArgs e)
@@ -1046,27 +1049,42 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         private void ApplyLanguage()
         {
-            lblPageHeader.Text      = Loc.Get("RulesHeader");
-            lblDefaultConfig.Text   = Loc.Get("DefaultEQ");
-            lblPerApp.Text          = Loc.Get("PerAppConfig");
-            lblSettingsHeader.Text  = Loc.Get("Settings");
-            lblStartWithWin.Text    = Loc.Get("StartWithWin");
-            lblLanguage.Text        = Loc.Get("Language");
-            lblScanInterval.Text    = Loc.Get("ScanInterval");
-            lblScanIntervalDesc.Text = Loc.Get("ScanIntervalDesc");
-            lblSaveBtn.Text         = Loc.Get("BtnSave");
-            lblScanBtn.Text         = Loc.Get("BtnScan");
-            lblGeneralSection.Text  = Loc.Get("GeneralSection");
-            lblStartWithWinDesc.Text = Loc.Get("StartWithWinDesc");
-            lblDesktopWidget.Text   = Loc.Get("DesktopWidget");
-            lblDesktopWidgetDesc.Text = Loc.Get("DesktopWidgetDesc");
-            lblBtnClear.Text        = Loc.Get("BtnClear");
-            lblManualAdd.Text       = Loc.Get("ManualAdd");
-            lblBtnAddManual.Text    = Loc.Get("BtnAddManual");
-            
-            // GPU
+            // Title Bar & Chrome
+            txtOnlineBadge.Text         = Loc.Get("Online");
+            btnMinimizeTitle.ToolTip    = Loc.Get("ToolTipMinimize");
+            btnMaximizeTitle.ToolTip    = Loc.Get("ToolTipMaximize");
+            btnCloseTitle.ToolTip       = Loc.Get("ToolTipClose");
+
+            // Sidebar Navigation Tooltips
+            btnNavHome.ToolTip          = Loc.Get("NavHome");
+            btnNavDevice.ToolTip        = Loc.Get("NavDeviceManager");
             btnNavGpu.ToolTip           = Loc.Get("NavGpuMonitor");
+            btnNavTelemetry.ToolTip     = Loc.Get("NavTelemetry");
+            btnNavSettings.ToolTip      = Loc.Get("NavSettings");
+
+            // Profiles Page
+            lblPageHeader.Text          = Loc.Get("RulesHeader");
+            lblPageDesc.Text            = Loc.Get("RulesDesc");
+            lblDefaultConfig.Text       = Loc.Get("DefaultEQ");
+            lblDefaultConfigDesc.Text   = Loc.Get("DefaultEQDesc");
+            lblPerApp.Text              = Loc.Get("PerAppConfig");
+            lblTargetPresetHeader.Text  = Loc.Get("TargetSonarConfig");
+            lblScanBtn.Text             = Loc.Get("BtnScan");
+            lblBtnClear.Text            = Loc.Get("BtnClear");
+            lblManualAdd.Text           = Loc.Get("ManualAdd");
+            lblBtnAddManual.Text        = Loc.Get("BtnAddManual");
+            btnBrowseExe.ToolTip        = Loc.Get("ManualBrowse");
+            
+            // Device Manager
+            lblDeviceManagerHeader.Text = Loc.Get("DeviceManagerHeader");
+            lblDeviceManagerDesc.Text   = Loc.Get("DeviceManagerDesc");
+            lblDeviceDelay.Text         = Loc.Get("DeviceDelayTitle");
+            btnSaveDevices.Content      = Loc.Get("BtnSaveAndApply");
+            txtSavedDevice.Text         = Loc.Get("SavedSuccess");
+
+            // GPU Monitor
             lblGpuMonitorHeader.Text    = Loc.Get("GpuMonitorHeader");
+            lblGpuMonitorDesc.Text      = Loc.Get("GpuMonitorDesc");
             lblGpuCoreClock.Text        = Loc.Get("GpuCoreClock");
             lblGpuTemperature.Text      = Loc.Get("GpuTemperature");
             lblGpuUsage.Text            = Loc.Get("GpuUsage");
@@ -1078,43 +1096,36 @@ namespace Warden
             lblGpuCooldownTitle.Text    = Loc.Get("GpuCooldownTitle");
             lblGpuCooldownDesc.Text     = Loc.Get("GpuCooldownDesc");
             
-            // Device Manager
-            btnNavDevice.ToolTip        = Loc.Get("NavDeviceManager");
-            lblDeviceManagerHeader.Text = Loc.Get("DeviceManagerHeader");
-            lblDeviceManagerDesc.Text   = Loc.Get("DeviceManagerDesc");
-            btnSaveDevices.Content      = Loc.Get("BtnSaveAndApply");
-            txtSavedDevice.Text         = Loc.Get("SavedSuccess");
+            // Settings Page
+            lblSettingsHeader.Text      = Loc.Get("SettingsHeader");
+            lblSettingsDesc.Text        = Loc.Get("SettingsDesc");
+            lblGeneralSection.Text      = Loc.Get("GeneralSection");
+            lblStartWithWin.Text        = Loc.Get("StartWithWin");
+            lblStartWithWinDesc.Text    = Loc.Get("StartWithWinDesc");
+            lblDesktopWidget.Text       = Loc.Get("DesktopWidget");
+            lblDesktopWidgetDesc.Text   = Loc.Get("DesktopWidgetDesc");
+            lblWidgetProfilesTitle.Text = Loc.Get("WidgetVisibleProfiles");
+            chkWidgetProf1.Content      = Loc.Get("WidgetProfPerformance");
+            chkWidgetProf2.Content      = Loc.Get("WidgetProfGame");
+            chkWidgetProf3.Content      = Loc.Get("WidgetProfInternet");
+            chkWidgetProf4.Content      = Loc.Get("WidgetProfBattery");
+            lblLanguage.Text            = Loc.Get("Language");
+            lblScanInterval.Text        = Loc.Get("ScanInterval");
+            lblScanIntervalDesc.Text    = Loc.Get("ScanIntervalDesc");
+            lblSaveBtn.Text             = Loc.Get("BtnSaveSettings");
 
             // Telemetry
-            btnNavTelemetry.ToolTip     = Loc.Get("NavTelemetry");
             lblTelemetryHeader.Text     = Loc.Get("TelemetryHeader");
             lblTelemetryDesc.Text       = Loc.Get("TelemetryDesc");
             lblFavoritesTitle.Text      = Loc.Get("FavoritesTitle");
             lblLiveGraphTitle.Text      = Loc.Get("LiveGraphTitle");
             txtNoGraphHint.Text         = Loc.Get("NoGraphSensorsHint");
-            lblChartNow.Text            = Loc.Get("ChartNow");
+            lblGraphNow.Text            = Loc.Get("GraphNow");
 
-            // Önceden XAML'de sabit Türkçe kalan metinler
-            lblProfilesDesc.Text        = Loc.Get("ProfilesDesc");
-            lblDefaultEQDesc.Text       = Loc.Get("DefaultEQDesc");
-            lblColPreset.Text           = Loc.Get("ColPreset");
-            lblDeviceDelay.Text         = Loc.Get("DeviceDelay");
-            lblGpuMonitorDesc.Text      = Loc.Get("GpuMonitorDesc");
-            lblSettingsDesc.Text        = Loc.Get("SettingsDesc");
-            lblWidgetProfilesTitle.Text = Loc.Get("WidgetProfilesTitle");
+            // ThrottleStop konumu ve açılır listeler
             lblTsPath.Text              = Loc.Get("TsPath");
             lblTsPathDesc.Text          = Loc.Get("TsPathDesc");
             UpdateThrottleStopStatus();
-            chkWidgetProf1.Content      = Loc.Get("WidgetProf1");
-            chkWidgetProf2.Content      = Loc.Get("WidgetProf2");
-            chkWidgetProf3.Content      = Loc.Get("WidgetProf3");
-            chkWidgetProf4.Content      = Loc.Get("WidgetProf4");
-            btnTitleMinimize.ToolTip    = Loc.Get("TipMinimize");
-            btnTitleMaximize.ToolTip    = Loc.Get("TipMaximize");
-            btnTitleClose.ToolTip       = Loc.Get("TipClose");
-            btnNavHome.ToolTip          = Loc.Get("NavProfiles");
-            btnNavSettings.ToolTip      = Loc.Get("Settings");
-
             foreach (ComboBoxItem item in cbTargetProfile.Items)
                 item.Content = Loc.Format("ProfileN", item.Tag);
             foreach (ComboBoxItem item in cbCooldown.Items)

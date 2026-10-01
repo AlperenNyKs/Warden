@@ -17,6 +17,7 @@ namespace Warden
     public class TrayApplicationContext
     {
         private readonly NotifyIcon _trayIcon;
+        private readonly ToolStripMenuItem _menuOpen, _menuWidget, _menuReload, _menuDiscover, _menuExit;
         private readonly SteelSeriesClient _client;
         private readonly Application _app;
         private SonarWatcher? _watcher;
@@ -76,30 +77,23 @@ namespace Warden
             };
 
             // 2. Context Menu (metinler her açılışta seçili dile göre yenilenir)
+            // Menü bir kez oluşturulur; dil değişince yalnızca metinler güncellenir (UpdateTrayMenu)
             var contextMenu = new ContextMenuStrip();
-            var openMenuItem     = new ToolStripMenuItem("", null, (s, e) => ShowMainWindow());
-            var widgetMenuItem   = new ToolStripMenuItem("", null, (s, e) => ToggleDesktopWidget());
-            var reloadMenuItem   = new ToolStripMenuItem("", null, (s, e) => ReloadConfigFromDisk());
-            var discoverMenuItem = new ToolStripMenuItem("", null, async (s, e) => await DiscoverFromTray());
-            var exitMenuItem     = new ToolStripMenuItem("", null, (s, e) => Exit());
-            contextMenu.Items.Add(openMenuItem);
-            contextMenu.Items.Add(widgetMenuItem);
-            contextMenu.Items.Add(reloadMenuItem);
-            contextMenu.Items.Add(discoverMenuItem);
+            _menuOpen     = new ToolStripMenuItem("", null, (s, e) => ShowMainWindow());
+            _menuWidget   = new ToolStripMenuItem("", null, (s, e) => ToggleDesktopWidget());
+            _menuReload   = new ToolStripMenuItem("", null, (s, e) => ReloadConfigFromDisk());
+            _menuDiscover = new ToolStripMenuItem("", null, async (s, e) => await DiscoverFromTray());
+            _menuExit     = new ToolStripMenuItem("", null, (s, e) => Exit());
+            contextMenu.Items.Add(_menuOpen);
+            contextMenu.Items.Add(_menuWidget);
+            contextMenu.Items.Add(_menuReload);
+            contextMenu.Items.Add(_menuDiscover);
             contextMenu.Items.Add(new ToolStripSeparator());
-            contextMenu.Items.Add(exitMenuItem);
-            contextMenu.Opening += (s, e) =>
-            {
-                openMenuItem.Text     = Loc.Get("TrayOpen");
-                widgetMenuItem.Text   = Loc.Get("TrayWidget");
-                reloadMenuItem.Text   = Loc.Get("TrayReload");
-                discoverMenuItem.Text = Loc.Get("TrayDiscover");
-                exitMenuItem.Text     = Loc.Get("TrayExit");
-                widgetMenuItem.Checked = Config.DesktopWidgetEnabled;
-            };
+            contextMenu.Items.Add(_menuExit);
+            contextMenu.Opening += (s, e) => UpdateTrayMenu();
             _trayIcon.ContextMenuStrip = contextMenu;
 
-            // 3. Load config and start watcher
+            // 3. Load config and start watcher (menü metinleri de burada seçili dile göre ayarlanır)
             LoadConfigAndStart();
 
             // 4. Pre-create MainWindow on background idle dispatcher so opening from tray is instantaneous (0ms)
@@ -139,6 +133,25 @@ namespace Warden
             catch { }
             // Fallback: uygulama varsayılan ikonu
             return System.Drawing.SystemIcons.Application;
+        }
+
+        /// <summary>Tray menüsü metinlerini seçili dile göre günceller (menü her açılışta da çağırır).</summary>
+        public void UpdateTrayMenu()
+        {
+            _menuOpen.Text     = Loc.Get("TrayOpenSettings");
+            _menuWidget.Text   = Loc.Get("TrayDesktopWidget");
+            _menuReload.Text   = Loc.Get("TrayReloadConfig");
+            _menuDiscover.Text = Loc.Get("TrayDiscoverPresets");
+            _menuExit.Text     = Loc.Get("TrayExit");
+            _menuWidget.Checked = Config.DesktopWidgetEnabled;
+        }
+
+        public void UpdateDesktopWidgetLanguage()
+        {
+            _app.Dispatcher.Invoke(() =>
+            {
+                _desktopWidget?.ApplyLanguage();
+            });
         }
 
         /// <summary>
@@ -285,6 +298,8 @@ namespace Warden
 
                 // Apply Localization
                 Loc.CurrentLang = Config.Language;
+                UpdateTrayMenu();
+                UpdateDesktopWidgetLanguage();
 
                 // Apply Startup Registry / Task (arka planda, yalnızca gerekirse)
                 ApplyStartupIfChanged();
@@ -459,11 +474,6 @@ namespace Warden
                     Log($"[WIDGET ERROR] Failed to show widget: {ex.Message}");
                 }
             });
-        }
-
-        public void ApplyLanguageToWidget()
-        {
-            _app.Dispatcher.Invoke(() => _desktopWidget?.ApplyLanguage());
         }
 
         public void UpdateDesktopWidgetProfiles()

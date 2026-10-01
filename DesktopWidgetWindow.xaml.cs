@@ -70,7 +70,11 @@ namespace Warden
 
             // Load position & lock state
             _isLocked = _config.DesktopWidgetLocked;
-            UpdateLockVisuals();
+            ApplyLanguage();
+            if (mainCard.ContextMenu != null)
+            {
+                mainCard.ContextMenu.Opened += (s, e) => ApplyLanguage();
+            }
 
             // Sanitize coordinates within screen bounds
             double left = _config.DesktopWidgetLeft;
@@ -89,7 +93,6 @@ namespace Warden
             this.Top = top;
 
             // Load profile names & visibility
-            ApplyLanguage();
             UpdateProfileButtonLabels();
             ApplyVisibleProfiles();
 
@@ -128,15 +131,6 @@ namespace Warden
         {
             _isClosing = true;
             base.OnClosing(e);
-        }
-
-        public void ApplyLanguage()
-        {
-            menuStartTS.Header = Loc.Get("WidgetStartTS");
-            menuOpenWarden.Header = Loc.Get("WidgetOpenWarden");
-            menuHideWidget.Header = Loc.Get("WidgetHide");
-            btnLockToggle.ToolTip = Loc.Get("WidgetLockTip");
-            UpdateLockVisuals();
         }
 
         private void OnProfileNamesChanged(object? sender, EventArgs e)
@@ -346,10 +340,19 @@ namespace Warden
             BtnLockToggle_Click(sender, e);
         }
 
+        public void ApplyLanguage()
+        {
+            UpdateLockVisuals();
+            menuStartTS.Header = Loc.Get("WidgetStartTS");
+            menuOpenWarden.Header = Loc.Get("WidgetOpenWarden");
+            menuHideWidget.Header = Loc.Get("WidgetHide");
+        }
+
         private void UpdateLockVisuals()
         {
             txtLockIcon.Text = _isLocked ? "🔒" : "🔓";
             menuLock.Header = _isLocked ? Loc.Get("WidgetUnlock") : Loc.Get("WidgetLock");
+            btnLockToggle.ToolTip = Loc.Get("WidgetLockTooltip");
             mainCard.Cursor = _isLocked ? Cursors.Arrow : Cursors.SizeAll;
         }
 
