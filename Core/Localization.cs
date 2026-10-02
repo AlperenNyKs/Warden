@@ -20,13 +20,6 @@ namespace Warden
                     { "GeneralSection",         "GENERAL SETTINGS" },
                     { "StartWithWin",           "Start with Windows" },
                     { "StartWithWinDesc",       "Automatically launches minimized in system tray on system boot." },
-                    { "DesktopWidget",          "Desktop ThrottleStop Widget" },
-                    { "DesktopWidgetDesc",      "Pinned desktop widget for quick 4-profile switching." },
-                    { "WidgetVisibleProfiles",  "Profiles Visible on Widget:" },
-                    { "WidgetProfPerformance",  "⚡ Performance" },
-                    { "WidgetProfGame",         "🎮 Game" },
-                    { "WidgetProfInternet",     "🌐 Internet" },
-                    { "WidgetProfBattery",      "🔋 Battery" },
                     { "Language",               "Language / Dil" },
                     { "ScanInterval",           "Scan Interval (ms)" },
                     { "ScanIntervalDesc",       "How frequently to check the active game/window." },
@@ -122,20 +115,11 @@ namespace Warden
 
                     // Tray Context Menu
                     { "TrayOpenSettings",       "Open Dashboard" },
-                    { "TrayDesktopWidget",      "Desktop Widget" },
                     { "TrayReloadConfig",       "Reload Configuration" },
                     { "TrayDiscoverPresets",    "Discover Presets" },
                     { "TrayExit",               "Exit" },
 
-                    // Desktop Widget Menu
-                    { "WidgetLock",             "🔒 Lock Position" },
-                    { "WidgetUnlock",           "🔓 Unlock Position" },
-                    { "WidgetLockTooltip",      "Lock / Move Position" },
-                    { "WidgetStartTS",          "⚡ Launch ThrottleStop" },
-                    { "WidgetOpenWarden",       "⚙️ Warden Settings (Profile Selection)" },
-                    { "WidgetHide",             "❌ Hide Widget" },
-
-                    // Notifications, telemetry sensor names & ThrottleStop location
+                    // Notifications & telemetry sensor names
                     { "Scanning", "Scanning..." },
                     { "ProfileN", "Profile {0}" },
                     { "SecondsN", "{0} Seconds" },
@@ -158,13 +142,7 @@ namespace Warden
                     { "SensorChipset", "Chipset" },
                     { "SensorVrm", "VRM MOS Temperature" },
                     { "SensorMemLoad", "Memory Usage (%)" },
-                    { "SensorMemUsed", "Used Memory" },
-                    { "TsPath", "ThrottleStop Location" },
-                    { "TsPathDesc", "Path of ThrottleStop.exe. Leave empty to detect automatically." },
-                    { "TsPathFound", "✔ Using: {0}" },
-                    { "TsPathNotFound", "⚠ ThrottleStop not found — please select ThrottleStop.exe" },
-                    { "TsPathInvalid", "⚠ File not found or not an .exe: {0}" },
-                    { "TsBrowseTitle", "Select ThrottleStop.exe" }
+                    { "SensorMemUsed", "Used Memory" }
                 }
             },
             {
@@ -179,13 +157,6 @@ namespace Warden
                     { "GeneralSection",         "GENEL AYARLAR" },
                     { "StartWithWin",           "Windows ile Başlat" },
                     { "StartWithWinDesc",       "Bilgisayar açıldığında arka planda sistem tepsisinde sessizce başlar." },
-                    { "DesktopWidget",          "Masaüstü ThrottleStop Widget'ı" },
-                    { "DesktopWidgetDesc",      "Masaüstüne sabit, hızlı 4 profilli kontrol widget'ı." },
-                    { "WidgetVisibleProfiles",  "Widget'ta Görünecek Profiller:" },
-                    { "WidgetProfPerformance",  "⚡ Performans" },
-                    { "WidgetProfGame",         "🎮 Oyun" },
-                    { "WidgetProfInternet",     "🌐 İnternet" },
-                    { "WidgetProfBattery",      "🔋 Pil" },
                     { "Language",               "Dil / Language" },
                     { "ScanInterval",           "Tarama Aralığı (ms)" },
                     { "ScanIntervalDesc",       "Aktif oyun veya pencerenin ne sıklıkla kontrol edileceği." },
@@ -281,20 +252,11 @@ namespace Warden
 
                     // Tray Context Menu
                     { "TrayOpenSettings",       "Kontrol Panelini Aç" },
-                    { "TrayDesktopWidget",      "Masaüstü Widget'ı" },
                     { "TrayReloadConfig",       "Yapılandırmayı Yenile" },
                     { "TrayDiscoverPresets",    "Profilleri Keşfet" },
                     { "TrayExit",               "Çıkış" },
 
-                    // Desktop Widget Menu
-                    { "WidgetLock",             "🔒 Konumu Kilitle" },
-                    { "WidgetUnlock",           "🔓 Konum Kilidini Aç" },
-                    { "WidgetLockTooltip",      "Konumu Kilitle / Taşı" },
-                    { "WidgetStartTS",          "⚡ ThrottleStop'u Başlat" },
-                    { "WidgetOpenWarden",       "⚙️ Warden Ayarları (Profil Seçimi)" },
-                    { "WidgetHide",             "❌ Widget'ı Gizle" },
-
-                    // Notifications, telemetry sensor names & ThrottleStop location
+                    // Notifications & telemetry sensor names
                     { "Scanning", "Taranıyor..." },
                     { "ProfileN", "Profil {0}" },
                     { "SecondsN", "{0} Saniye" },
@@ -317,13 +279,7 @@ namespace Warden
                     { "SensorChipset", "Yonga Seti (Chipset)" },
                     { "SensorVrm", "VRM MOS Sıcaklığı" },
                     { "SensorMemLoad", "Bellek Kullanımı (%)" },
-                    { "SensorMemUsed", "Kullanılan Bellek" },
-                    { "TsPath", "ThrottleStop Konumu" },
-                    { "TsPathDesc", "ThrottleStop.exe dosyasının yolu. Boş bırakılırsa otomatik aranır." },
-                    { "TsPathFound", "✔ Kullanılan: {0}" },
-                    { "TsPathNotFound", "⚠ ThrottleStop bulunamadı — lütfen ThrottleStop.exe dosyasını seçin" },
-                    { "TsPathInvalid", "⚠ Dosya bulunamadı veya .exe değil: {0}" },
-                    { "TsBrowseTitle", "ThrottleStop.exe dosyasını seçin" }
+                    { "SensorMemUsed", "Kullanılan Bellek" }
                 }
             }
         };

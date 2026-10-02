@@ -31,15 +31,6 @@ namespace Warden
         public List<string> TelemetryFavorites { get; set; } = new();
         public List<string> TelemetryGraphSensors { get; set; } = new();
 
-        // Desktop Widget & ThrottleStop
-        public bool DesktopWidgetEnabled { get; set; } = true;
-        public double DesktopWidgetLeft { get; set; } = 100;
-        public double DesktopWidgetTop { get; set; } = 100;
-        public bool DesktopWidgetLocked { get; set; } = false;
-        public List<int> DesktopWidgetVisibleProfiles { get; set; } = new() { 0, 1, 2, 3 };
-        // Boş = otomatik algıla (ThrottleStopService bilinen konumları tarar). Ayarlar sayfasından değiştirilebilir.
-        public string ThrottleStopPath { get; set; } = "";
-
         // UI Settings (MainWindow.xaml varsayılanlarıyla aynı)
         public double WindowWidth { get; set; } = 940;
         public double WindowHeight { get; set; } = 640;
@@ -72,13 +63,8 @@ namespace Warden
             DisabledDeviceNames ??= new();
             TelemetryFavorites ??= new();
             TelemetryGraphSensors ??= new();
-            DesktopWidgetVisibleProfiles = (DesktopWidgetVisibleProfiles ?? new())
-                .Where(i => i >= 0 && i <= 3).Distinct().OrderBy(i => i).ToList();
-            if (DesktopWidgetVisibleProfiles.Count == 0)
-                DesktopWidgetVisibleProfiles = new() { 0, 1, 2, 3 };
 
             DefaultPresetId ??= "";
-            ThrottleStopPath = (ThrottleStopPath ?? "").Trim().Trim('"');
             Language = string.Equals(Language, "EN", StringComparison.OrdinalIgnoreCase) ? "EN" : "TR";
 
             CheckIntervalMilliseconds = Math.Clamp(CheckIntervalMilliseconds, MinCheckIntervalMs, MaxCheckIntervalMs);

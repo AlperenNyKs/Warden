@@ -952,62 +952,6 @@
                                         </Grid>
                                     </Border>
 
-                                                                        <!-- Desktop ThrottleStop Widget -->
-                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
-                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
-                                        <StackPanel>
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel>
-                                                    <TextBlock x:Name="lblDesktopWidget" Text="Masaüstü ThrottleStop Widget'ı"
-                                                               Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
-                                                    <TextBlock x:Name="lblDesktopWidgetDesc"
-                                                               Text="Masaüstüne sabit, hızlı profil kontrol widget'ı."
-                                                               Foreground="{StaticResource TxtSecond}" FontSize="11"/>
-                                                </StackPanel>
-                                                <CheckBox x:Name="chkDesktopWidget" Grid.Column="1"
-                                                          Checked="ChkDesktopWidget_Changed" Unchecked="ChkDesktopWidget_Changed"
-                                                          VerticalAlignment="Center"/>
-                                            </Grid>
-
-                                            <!-- Visible Profiles Selector -->
-                                            <StackPanel x:Name="panelWidgetProfiles" Margin="0,10,0,0">
-                                                <Separator Background="{StaticResource Border}" Margin="0,0,0,8"/>
-                                                <TextBlock x:Name="lblWidgetProfilesTitle" Text="Widget'ta Görünecek Profiller:" Foreground="{StaticResource TxtSecond}" FontSize="11" Margin="0,0,0,6"/>
-                                                <WrapPanel Orientation="Horizontal">
-                                                    <CheckBox x:Name="chkWidgetProf1" Content="⚡ Performans" Margin="0,0,14,0" Checked="ChkWidgetProfile_Changed" Unchecked="ChkWidgetProfile_Changed"/>
-                                                    <CheckBox x:Name="chkWidgetProf2" Content="🎮 Oyun" Margin="0,0,14,0" Checked="ChkWidgetProfile_Changed" Unchecked="ChkWidgetProfile_Changed"/>
-                                                    <CheckBox x:Name="chkWidgetProf3" Content="🌐 İnternet" Margin="0,0,14,0" Checked="ChkWidgetProfile_Changed" Unchecked="ChkWidgetProfile_Changed"/>
-                                                    <CheckBox x:Name="chkWidgetProf4" Content="🔋 Pil" Margin="0,0,0,0" Checked="ChkWidgetProfile_Changed" Unchecked="ChkWidgetProfile_Changed"/>
-                                                </WrapPanel>
-                                            </StackPanel>
-
-                                            <!-- ThrottleStop Location -->
-                                            <Separator Background="{StaticResource Border}" Margin="0,10,0,8"/>
-                                            <TextBlock x:Name="lblTsPath" Text="ThrottleStop Konumu"
-                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
-                                            <TextBlock x:Name="lblTsPathDesc" Text="ThrottleStop.exe dosyasının yolu. Boş bırakılırsa otomatik aranır."
-                                                       Foreground="{StaticResource TxtSecond}" FontSize="11" Margin="0,0,0,6"/>
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
-                                                <TextBox x:Name="txtThrottleStopPath" LostFocus="TxtThrottleStopPath_LostFocus"
-                                                         KeyDown="TxtThrottleStopPath_KeyDown"/>
-                                                <Button x:Name="btnBrowseThrottleStop" Grid.Column="1"
-                                                        Style="{StaticResource FlatButton}"
-                                                        Padding="10,6" Margin="6,0,0,0" Content="📁"
-                                                        Click="BtnBrowseThrottleStop_Click"/>
-                                            </Grid>
-                                            <TextBlock x:Name="txtThrottleStopStatus" FontSize="11" Margin="0,4,0,0"
-                                                       Foreground="{StaticResource TxtSecond}" TextTrimming="CharacterEllipsis"/>
-                                        </StackPanel>
-                                    </Border>
-
                                     <!-- Language -->
                                     <Border Background="{StaticResource BgInput}" CornerRadius="8"
                                             Padding="14,12" Margin="0,0,0,10" BorderThickness="0">

@@ -207,9 +207,6 @@ namespace Warden
             btnNavTelemetry.Foreground = page == "telemetry" ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
             btnNavSettings.Foreground  = page == "settings"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
 
-            if (page == "settings")
-                UpdateThrottleStopStatus(); // Exe sonradan silinmiş/taşınmış olabilir
-
             if (page == "telemetry")
             {
                 StartTelemetry();
@@ -230,14 +227,6 @@ namespace Warden
             {
                 txtInterval.Text   = _context.Config.CheckIntervalMilliseconds.ToString();
                 chkStartup.IsChecked = _context.Config.StartWithWindows;
-                chkDesktopWidget.IsChecked = _context.Config.DesktopWidgetEnabled;
-                panelWidgetProfiles.Visibility = _context.Config.DesktopWidgetEnabled ? Visibility.Visible : Visibility.Collapsed;
-
-                var visibleProfs = _context.Config.DesktopWidgetVisibleProfiles ?? new List<int> { 0, 1, 2, 3 };
-                chkWidgetProf1.IsChecked = visibleProfs.Contains(0);
-                chkWidgetProf2.IsChecked = visibleProfs.Contains(1);
-                chkWidgetProf3.IsChecked = visibleProfs.Contains(2);
-                chkWidgetProf4.IsChecked = visibleProfs.Contains(3);
 
                 foreach (ComboBoxItem item in cbLanguage.Items)
                 {
@@ -260,9 +249,6 @@ namespace Warden
 
                 // Device delay
                 txtDeviceDelay.Text = _context.Config.DeviceDisableDelaySeconds.ToString();
-
-                // ThrottleStop location
-                txtThrottleStopPath.Text = _context.Config.ThrottleStopPath;
 
                 ApplyLanguage();
                 RenderRulesList();
@@ -356,15 +342,6 @@ namespace Warden
                 _suppressPresetSave = false;
             }
             if (_currentPage == "telemetry" && IsVisible) StartTelemetry();
-        }
-
-        /// <summary>Widget tepsi menüsünden / widget üzerinden açılıp kapatıldığında onay kutusunu senkronlar.</summary>
-        public void SyncDesktopWidgetState()
-        {
-            bool enabled = _context.Config.DesktopWidgetEnabled;
-            if (chkDesktopWidget.IsChecked != enabled)
-                chkDesktopWidget.IsChecked = enabled; // ChkDesktopWidget_Changed config ile aynı olduğu için tekrar kaydetmez
-            panelWidgetProfiles.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -696,129 +673,6 @@ namespace Warden
             AutoSaveSettings();
         }
 
-        private void ChkDesktopWidget_Changed(object sender, RoutedEventArgs e)
-        {
-            if (_context == null || _isPopulatingControls) return;
-            bool enabled = chkDesktopWidget.IsChecked == true;
-            panelWidgetProfiles.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
-            if (_context.Config.DesktopWidgetEnabled != enabled)
-            {
-                _context.Config.DesktopWidgetEnabled = enabled;
-                _context.SaveConfig();
-                if (enabled)
-                    _context.ShowDesktopWidget();
-                else
-                    _context.HideDesktopWidget();
-            }
-        }
-
-        private void ChkWidgetProfile_Changed(object sender, RoutedEventArgs e)
-        {
-            if (!IsLoaded || _context == null || _isPopulatingControls) return;
-
-            var list = new List<int>();
-            if (chkWidgetProf1.IsChecked == true) list.Add(0);
-            if (chkWidgetProf2.IsChecked == true) list.Add(1);
-            if (chkWidgetProf3.IsChecked == true) list.Add(2);
-            if (chkWidgetProf4.IsChecked == true) list.Add(3);
-
-            // En az biri seçili olmalı, hiçbiri seçili değilse varsayılan hepsi
-            if (list.Count == 0)
-            {
-                list.Add(0);
-                chkWidgetProf1.IsChecked = true;
-            }
-
-            _context.Config.DesktopWidgetVisibleProfiles = list;
-            _context.SaveConfig();
-            _context.UpdateDesktopWidgetProfiles();
-        }
-
-        // ── ThrottleStop konumu ─────────────────────────────────────────
-        private void TxtThrottleStopPath_LostFocus(object sender, RoutedEventArgs e)
-            => CommitThrottleStopPath(txtThrottleStopPath.Text);
-
-        private void TxtThrottleStopPath_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-        {
-            if (e.Key == Key.Enter)
-            {
-                CommitThrottleStopPath(txtThrottleStopPath.Text);
-                e.Handled = true;
-            }
-        }
-
-        private void BtnBrowseThrottleStop_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Filter = "ThrottleStop|ThrottleStop*.exe|Executable Files|*.exe",
-                Title = Loc.Get("TsBrowseTitle"),
-                CheckFileExists = true
-            };
-
-            // Mevcut konumun klasöründen başla
-            try
-            {
-                string current = _context.GetThrottleStopService().ExePath;
-                string? dir = string.IsNullOrEmpty(current) ? null : System.IO.Path.GetDirectoryName(current);
-                if (!string.IsNullOrEmpty(dir) && System.IO.Directory.Exists(dir))
-                    dialog.InitialDirectory = dir;
-            }
-            catch { }
-
-            if (dialog.ShowDialog(this) == true)
-            {
-                txtThrottleStopPath.Text = dialog.FileName;
-                CommitThrottleStopPath(dialog.FileName);
-            }
-        }
-
-        private void CommitThrottleStopPath(string rawPath)
-        {
-            if (_context == null || _isPopulatingControls) return;
-
-            string path = (rawPath ?? "").Trim().Trim('"');
-
-            // Değişmediyse servisi boşuna yeniden oluşturma
-            if (string.Equals(path, _context.Config.ThrottleStopPath, StringComparison.OrdinalIgnoreCase))
-            {
-                UpdateThrottleStopStatus();
-                return;
-            }
-
-            // Geçersiz yol kaydedilmez; kullanıcıya gösterilir (boş = otomatik algıla, geçerli)
-            if (path.Length > 0 &&
-                (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(path)))
-            {
-                txtThrottleStopStatus.Text = Loc.Format("TsPathInvalid", path);
-                txtThrottleStopStatus.Foreground = (Brush)FindResource("Red");
-                return;
-            }
-
-            _context.ApplyThrottleStopPath(path);
-            UpdateThrottleStopStatus();
-        }
-
-        private void UpdateThrottleStopStatus()
-        {
-            if (_context == null) return;
-            try
-            {
-                var ts = _context.GetThrottleStopService();
-                if (ts.IsExeFound)
-                {
-                    txtThrottleStopStatus.Text = Loc.Format("TsPathFound", ts.ExePath);
-                    txtThrottleStopStatus.Foreground = (Brush)FindResource("Accent");
-                }
-                else
-                {
-                    txtThrottleStopStatus.Text = Loc.Get("TsPathNotFound");
-                    txtThrottleStopStatus.Foreground = (Brush)FindResource("Red");
-                }
-            }
-            catch { }
-        }
-
         private void TxtInterval_LostFocus(object sender, RoutedEventArgs e)
         {
             AutoSaveSettings();
@@ -932,12 +786,11 @@ namespace Warden
 
                 if (changed && IsLoaded)
                 {
-                    // Dinamik oluşturulan satırlar, sensör adları, tepsi menüsü ve widget da yeni dile geçsin
+                    // Dinamik oluşturulan satırlar, sensör adları ve tepsi menüsü de yeni dile geçsin
                     RenderRulesList();
                     _lastCategoryStructureKey = "";
                     _lastFavoritesKey = "";
                     _context.UpdateTrayMenu();
-                    _context.UpdateDesktopWidgetLanguage();
                 }
             }
         }
@@ -1102,13 +955,6 @@ namespace Warden
             lblGeneralSection.Text      = Loc.Get("GeneralSection");
             lblStartWithWin.Text        = Loc.Get("StartWithWin");
             lblStartWithWinDesc.Text    = Loc.Get("StartWithWinDesc");
-            lblDesktopWidget.Text       = Loc.Get("DesktopWidget");
-            lblDesktopWidgetDesc.Text   = Loc.Get("DesktopWidgetDesc");
-            lblWidgetProfilesTitle.Text = Loc.Get("WidgetVisibleProfiles");
-            chkWidgetProf1.Content      = Loc.Get("WidgetProfPerformance");
-            chkWidgetProf2.Content      = Loc.Get("WidgetProfGame");
-            chkWidgetProf3.Content      = Loc.Get("WidgetProfInternet");
-            chkWidgetProf4.Content      = Loc.Get("WidgetProfBattery");
             lblLanguage.Text            = Loc.Get("Language");
             lblScanInterval.Text        = Loc.Get("ScanInterval");
             lblScanIntervalDesc.Text    = Loc.Get("ScanIntervalDesc");
@@ -1122,10 +968,6 @@ namespace Warden
             txtNoGraphHint.Text         = Loc.Get("NoGraphSensorsHint");
             lblGraphNow.Text            = Loc.Get("GraphNow");
 
-            // ThrottleStop konumu ve açılır listeler
-            lblTsPath.Text              = Loc.Get("TsPath");
-            lblTsPathDesc.Text          = Loc.Get("TsPathDesc");
-            UpdateThrottleStopStatus();
             foreach (ComboBoxItem item in cbTargetProfile.Items)
                 item.Content = Loc.Format("ProfileN", item.Tag);
             foreach (ComboBoxItem item in cbCooldown.Items)

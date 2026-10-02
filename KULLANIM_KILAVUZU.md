@@ -57,10 +57,5 @@ dotnet run -c Release
 5. **Aygıt Yöneticisi (🔇):**
    - İstemediğiniz sanal veya hayalet ses aygıtlarını arka planda otomatik devre dışı bırakır.
 
-6. **Masaüstü ThrottleStop Widget'ı:**
-   - **Ayarlar → Masaüstü ThrottleStop Widget'ı** bölümünden widget'ı açıp kapatabilir, görünecek profilleri seçebilirsiniz.
-   - **ThrottleStop Konumu** alanına `ThrottleStop.exe` yolunu yazın veya `📁` ile seçin. Boş bırakılırsa
-     Program Files ve sürücü köklerindeki `ThrottleStop*` klasörleri (ör. `D:\ThrottleStop_9.7`) otomatik aranır.
-
-7. **Kapatma:**
+6. **Kapatma:**
    - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Çıkış"** (İngilizcede "Exit") diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.

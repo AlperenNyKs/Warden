@@ -17,7 +17,7 @@ namespace Warden
     public class TrayApplicationContext
     {
         private readonly NotifyIcon _trayIcon;
-        private readonly ToolStripMenuItem _menuOpen, _menuWidget, _menuReload, _menuDiscover, _menuExit;
+        private readonly ToolStripMenuItem _menuOpen, _menuReload, _menuDiscover, _menuExit;
         private readonly SteelSeriesClient _client;
         private readonly Application _app;
         private SonarWatcher? _watcher;
@@ -32,11 +32,6 @@ namespace Warden
         private GpuMonitor? _gpuMonitor;
         private readonly AfterburnerService _afterburner = new();
         private DateTime _lastGpuProfileApplied = DateTime.MinValue;
-
-        // ThrottleStop & Desktop Widget
-        private ThrottleStopService? _throttleStopService;
-        private string? _throttleStopServicePath; // Servisin oluşturulduğu config yolu
-        private DesktopWidgetWindow? _desktopWidget;
 
         // Akıllı ReloadConfig: interval değişmediğinde watcher'ı yeniden başlatmamak için
         private int _lastIntervalMs = 0;
@@ -80,12 +75,10 @@ namespace Warden
             // Menü bir kez oluşturulur; dil değişince yalnızca metinler güncellenir (UpdateTrayMenu)
             var contextMenu = new ContextMenuStrip();
             _menuOpen     = new ToolStripMenuItem("", null, (s, e) => ShowMainWindow());
-            _menuWidget   = new ToolStripMenuItem("", null, (s, e) => ToggleDesktopWidget());
             _menuReload   = new ToolStripMenuItem("", null, (s, e) => ReloadConfigFromDisk());
             _menuDiscover = new ToolStripMenuItem("", null, async (s, e) => await DiscoverFromTray());
             _menuExit     = new ToolStripMenuItem("", null, (s, e) => Exit());
             contextMenu.Items.Add(_menuOpen);
-            contextMenu.Items.Add(_menuWidget);
             contextMenu.Items.Add(_menuReload);
             contextMenu.Items.Add(_menuDiscover);
             contextMenu.Items.Add(new ToolStripSeparator());
@@ -139,19 +132,9 @@ namespace Warden
         public void UpdateTrayMenu()
         {
             _menuOpen.Text     = Loc.Get("TrayOpenSettings");
-            _menuWidget.Text   = Loc.Get("TrayDesktopWidget");
             _menuReload.Text   = Loc.Get("TrayReloadConfig");
             _menuDiscover.Text = Loc.Get("TrayDiscoverPresets");
             _menuExit.Text     = Loc.Get("TrayExit");
-            _menuWidget.Checked = Config.DesktopWidgetEnabled;
-        }
-
-        public void UpdateDesktopWidgetLanguage()
-        {
-            _app.Dispatcher.Invoke(() =>
-            {
-                _desktopWidget?.ApplyLanguage();
-            });
         }
 
         /// <summary>
@@ -180,26 +163,6 @@ namespace Warden
         /// <summary>Tray menüsündeki "Reload Config": config.json'ı diskten yeniden okur.</summary>
         private void ReloadConfigFromDisk()
         {
-            // Diskteki ThrottleStop yolu değiştiyse servis yeni yolla yeniden oluşturulsun
-            if (_throttleStopService != null)
-            {
-                string diskPath = "";
-                try
-                {
-                    if (File.Exists(_configPath))
-                        diskPath = (JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(_configPath))?.ThrottleStopPath ?? "").Trim().Trim('"');
-                }
-                catch { diskPath = _throttleStopServicePath ?? ""; }
-
-                if (!string.Equals(diskPath, _throttleStopServicePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    _desktopWidget?.CloseForReal();
-                    _desktopWidget = null;
-                    _throttleStopService.Dispose();
-                    _throttleStopService = null;
-                }
-            }
-
             LoadConfigAndStart();
             _mainWindow?.ReloadFromConfig();
         }
@@ -299,7 +262,6 @@ namespace Warden
                 // Apply Localization
                 Loc.CurrentLang = Config.Language;
                 UpdateTrayMenu();
-                UpdateDesktopWidgetLanguage();
 
                 // Apply Startup Registry / Task (arka planda, yalnızca gerekirse)
                 ApplyStartupIfChanged();
@@ -316,15 +278,6 @@ namespace Warden
 
                 // Cihazları otomatik devre dışı bırakma ve sürekli denetimi başlat
                 StartDeviceEnforcement();
-
-                // ThrottleStop Masaüstü Widget'ı
-                _app.Dispatcher.BeginInvoke(() =>
-                {
-                    if (Config.DesktopWidgetEnabled)
-                        ShowDesktopWidget();
-                    else
-                        HideDesktopWidget();
-                });
             }
             catch (Exception ex)
             {
@@ -397,122 +350,6 @@ namespace Warden
                 fresh.Normalize();
                 return fresh;
             }
-        }
-
-        public ThrottleStopService GetThrottleStopService()
-        {
-            if (_throttleStopService == null)
-            {
-                _throttleStopService = new ThrottleStopService(Config.ThrottleStopPath, Log);
-                _throttleStopServicePath = Config.ThrottleStopPath;
-            }
-            return _throttleStopService;
-        }
-
-        /// <summary>
-        /// Ayarlar sayfasından ThrottleStop konumu değiştirildiğinde çağrılır: config'i kaydeder,
-        /// servisi yeni yolla yeniden oluşturur ve widget'ı yeni servise bağlar.
-        /// </summary>
-        public void ApplyThrottleStopPath(string path)
-        {
-            _app.Dispatcher.Invoke(() =>
-            {
-                Config.ThrottleStopPath = (path ?? "").Trim().Trim('"');
-                SaveConfig();
-
-                // Widget eski servisin olaylarına abone; önce widget kapatılır, sonra servis değiştirilir
-                bool widgetWasOpen = _desktopWidget != null;
-                if (_desktopWidget != null)
-                {
-                    _desktopWidget.CloseForReal();
-                    _desktopWidget = null;
-                }
-
-                _throttleStopService?.Dispose();
-                _throttleStopService = null;
-                var ts = GetThrottleStopService();
-                Log($"[THROTTLESTOP] Location set to '{Config.ThrottleStopPath}', using '{ts.ExePath}'");
-
-                if (widgetWasOpen && Config.DesktopWidgetEnabled)
-                    ShowDesktopWidget();
-            });
-        }
-
-        public void ShowDesktopWidget()
-        {
-            _app.Dispatcher.Invoke(() =>
-            {
-                try
-                {
-                    var ts = GetThrottleStopService();
-                    // "Reload Config" sonrası Config nesnesi değişir; widget eski nesneyi tutmasın diye yeniden oluşturulur
-                    if (_desktopWidget != null && !_desktopWidget.UsesConfig(Config))
-                    {
-                        _desktopWidget.CloseForReal();
-                        _desktopWidget = null;
-                    }
-
-                    if (_desktopWidget == null)
-                    {
-                        _desktopWidget = new DesktopWidgetWindow(
-                            ts,
-                            Config,
-                            () => SaveConfig(),
-                            () => ShowMainWindow(),
-                            () => _mainWindow?.SyncDesktopWidgetState()
-                        );
-                    }
-                    else
-                    {
-                        _desktopWidget.ApplyVisibleProfiles();
-                    }
-                    _desktopWidget.Show();
-                    Log($"[WIDGET] Desktop widget shown at ({_desktopWidget.Left}, {_desktopWidget.Top})");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[WIDGET ERROR] Failed to show widget: {ex.Message}");
-                }
-            });
-        }
-
-        public void UpdateDesktopWidgetProfiles()
-        {
-            _app.Dispatcher.Invoke(() =>
-            {
-                _desktopWidget?.ApplyVisibleProfiles();
-            });
-        }
-
-        public void HideDesktopWidget()
-        {
-            _app.Dispatcher.Invoke(() =>
-            {
-                if (_desktopWidget == null) return;
-
-                // Widget eski bir config nesnesini tutuyorsa (diskten yeniden yükleme sonrası) o nesnede
-                // "etkin" hâlâ true olabilir ve gizleme engellenir → widget tamamen kapatılır.
-                if (!_desktopWidget.UsesConfig(Config))
-                {
-                    _desktopWidget.CloseForReal();
-                    _desktopWidget = null;
-                    return;
-                }
-                _desktopWidget.Hide();
-            });
-        }
-
-        public void ToggleDesktopWidget()
-        {
-            Config.DesktopWidgetEnabled = !Config.DesktopWidgetEnabled;
-            SaveConfig();
-            if (Config.DesktopWidgetEnabled)
-                ShowDesktopWidget();
-            else
-                HideDesktopWidget();
-
-            // Ayarlar sayfasındaki onay kutusu tepsi menüsüyle senkron kalsın
-            _mainWindow?.SyncDesktopWidgetState();
         }
 
         private System.Threading.Timer? _deviceEnforceTimer;
@@ -841,18 +678,12 @@ namespace Warden
             Safe(() => _gpuMonitor?.Stop());
             Safe(() => _app.Dispatcher.Invoke(() =>
             {
-                if (_desktopWidget != null)
-                {
-                    _desktopWidget.CloseForReal();
-                    _desktopWidget = null;
-                }
                 if (_mainWindow != null)
                 {
                     _mainWindow.IsExitExplicit = true;
                     _mainWindow.Close();
                 }
             }));
-            Safe(() => _throttleStopService?.Dispose());
             Safe(() => _client.Dispose()); // FileSystemWatcher ve HttpClient'ı temizle
             Safe(() =>
             {
