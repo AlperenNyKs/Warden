@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using SensorType = LibreHardwareMonitor.Hardware.SensorType;
 using MessageBox  = System.Windows.MessageBox;
 using Color       = System.Windows.Media.Color;
 using Brush       = System.Windows.Media.Brush;
@@ -28,7 +29,7 @@ namespace Warden
         private readonly TrayApplicationContext _context;
         private HardwareMonitorService Telemetry => _context.Telemetry;
         private List<SonarConfig> _availablePresets = new();
-        private string _currentPage = "profiles";
+        private string _currentPage = "overview";
         private TelemetrySnapshot? _lastTelemetrySnapshot;
         private readonly Dictionary<string, (TextBlock txtVal, Button btnStar, Button btnGraph)> _categoryRowControls = new();
         private readonly Dictionary<string, TextBlock> _favoriteValControls = new();
@@ -90,6 +91,7 @@ namespace Warden
 
             LoadInitialConfig();
             _ = LoadSonarPresetsAsync();
+            ShowPage("overview");
 
             // Status LED pulse animasyonunu başlat (kontrol edilebilir: pencere gizliyken duraklatılır)
             Loaded += (s, e) =>
@@ -204,6 +206,9 @@ namespace Warden
         private void BtnNavStatus_Click(object sender, RoutedEventArgs e)
             => ShowPage("status");
 
+        private void BtnNavOverview_Click(object sender, RoutedEventArgs e)
+            => ShowPage("overview");
+
         // ── Sol alttaki Sonar göstergesi ──
         private void SetSonarIndicator(Color color)
         {
@@ -237,27 +242,31 @@ namespace Warden
         private void ShowPage(string page)
         {
             _currentPage = page;
-            pageProfiles.Visibility      = page == "profiles"  ? Visibility.Visible : Visibility.Collapsed;
-            pageDeviceManager.Visibility = page == "devices"   ? Visibility.Visible : Visibility.Collapsed;
-            pageGpuMonitor.Visibility    = page == "gpu"       ? Visibility.Visible : Visibility.Collapsed;
-            pageTelemetry.Visibility     = page == "telemetry" ? Visibility.Visible : Visibility.Collapsed;
-            pageSettings.Visibility      = page == "settings"  ? Visibility.Visible : Visibility.Collapsed;
-            pageStatus.Visibility        = page == "status"    ? Visibility.Visible : Visibility.Collapsed;
 
-            rectHomeActive.Visibility      = page == "profiles"  ? Visibility.Visible : Visibility.Collapsed;
-            rectDeviceActive.Visibility    = page == "devices"   ? Visibility.Visible : Visibility.Collapsed;
-            rectGpuActive.Visibility       = page == "gpu"       ? Visibility.Visible : Visibility.Collapsed;
-            rectTelemetryActive.Visibility = page == "telemetry" ? Visibility.Visible : Visibility.Collapsed;
-            rectSettingsActive.Visibility  = page == "settings"  ? Visibility.Visible : Visibility.Collapsed;
-            rectStatusActive.Visibility    = page == "status"    ? Visibility.Visible : Visibility.Collapsed;
+            var pages = new (string Key, UIElement Page, UIElement Indicator, Button Nav)[]
+            {
+                ("overview",  pageOverview,      rectOverviewActive,  btnNavOverview),
+                ("profiles",  pageProfiles,      rectHomeActive,      btnNavHome),
+                ("devices",   pageDeviceManager, rectDeviceActive,    btnNavDevice),
+                ("gpu",       pageGpuMonitor,    rectGpuActive,       btnNavGpu),
+                ("telemetry", pageTelemetry,     rectTelemetryActive, btnNavTelemetry),
+                ("status",    pageStatus,        rectStatusActive,    btnNavStatus),
+                ("settings",  pageSettings,      rectSettingsActive,  btnNavSettings),
+            };
+            foreach (var (key, pageElement, indicator, nav) in pages)
+            {
+                bool active = key == page;
+                pageElement.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+                indicator.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+                nav.Foreground = (Brush)FindResource(active ? "Accent" : "TxtSecond");
+                nav.Background = active ? (Brush)FindResource("NavActiveBg") : Brushes.Transparent;
+            }
 
-            btnNavHome.Foreground      = page == "profiles"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
-            btnNavDevice.Foreground    = page == "devices"   ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
-            btnNavGpu.Foreground       = page == "gpu"       ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
-            btnNavTelemetry.Foreground = page == "telemetry" ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
-            btnNavSettings.Foreground  = page == "settings"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
-            btnNavStatus.Foreground    = page == "status"    ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
-
+            if (page == "overview")
+            {
+                RefreshOverviewStatus();
+                if (_context.LastSnapshot != null) RenderOverview(_context.LastSnapshot);
+            }
             if (page == "status") _ = RunStatusChecksAsync();
 
             ApplyPageTelemetryDemand();
@@ -327,6 +336,7 @@ namespace Warden
                 string address = await _client.GetSonarAddressAsync();
                 txtConnectionStatus.Text = Loc.Format("SonarConnectedAt", address.Replace("http://", "").Replace("https://", ""));
                 SetSonarIndicator(Color.FromRgb(78, 201, 126));
+                _sonarConnected = true;
 
                 _availablePresets = await _client.GetConfigsAsync();
 
@@ -359,6 +369,7 @@ namespace Warden
             {
                 txtConnectionStatus.Text = Loc.Get("ConnFailed");
                 SetSonarIndicator(Color.FromRgb(224, 85, 85));
+                _sonarConnected = false;
                 txtActivePreset.Text = ex.Message;
             }
             finally
@@ -920,6 +931,218 @@ namespace Warden
         }
 
         // ══════════════════════════════════════════════════════════════
+        //  Overview (Panel) page
+        // ══════════════════════════════════════════════════════════════
+        private string _lastPresetName = "";
+        private bool _sonarConnected;
+        private TelemetrySnapshot? _lastOverviewSnapshot;
+        private bool? _afterburnerFound;
+        private bool? _pawnIoInstalled;
+
+        private static readonly Color OverviewGpuLineColor = (Color)ColorConverter.ConvertFromString("#38BDF8");
+
+        /// <summary>Telemetriden bağımsız durumları (bağlantılar, alarm, kayıt, güncelleme) yeniler.</summary>
+        private async void RefreshOverviewStatus()
+        {
+            RenderOverviewGame();
+            RenderOverviewChips();
+
+            // Kayıt defteri taraması UI thread'inde yapılmasın
+            if (_afterburnerFound == null || _pawnIoInstalled == null)
+            {
+                var (ab, pawn) = await Task.Run(() => (_context.AfterburnerPath != null, HardwareMonitorService.IsPawnIoInstalled));
+                _afterburnerFound = ab;
+                _pawnIoInstalled = pawn;
+                RenderOverviewChips();
+            }
+        }
+
+        private void RenderOverview(TelemetrySnapshot snapshot)
+        {
+            _lastOverviewSnapshot = snapshot;
+            var all = snapshot.AllSensors;
+
+            // CPU
+            var cpuTemp = snapshot.CpuTemperature;
+            SetGauge(ringCpu, txtOvCpuTemp, cpuTemp, _context.Config.CpuTempLimit);
+            txtOvCpuName.Text = all.FirstOrDefault(x => x.Category == "CPU")?.HardwareName ?? "–";
+            txtOvCpuLoad.Text = Loc.Format("OvLoad", FormatSensor(all, "CPU", SensorType.Load));
+            txtOvCpuClock.Text = Loc.Format("OvClock", FormatSensor(all, "CPU", SensorType.Clock));
+            txtOvCpuPower.Text = Loc.Format("OvPower", FormatSensor(all, "CPU", SensorType.Power));
+
+            // GPU
+            var gpu = snapshot.PrimaryGpu;
+            SetGauge(ringGpu, txtOvGpuTemp, gpu is { TemperatureCelsius: > 0 } ? gpu.TemperatureCelsius : null, _context.Config.GpuTempLimit);
+            txtOvGpuName.Text = gpu?.Name ?? (snapshot.HardwareReady ? Loc.Get("GpuNotFound") : Loc.Get("GpuDetecting"));
+            txtOvGpuLoad.Text = Loc.Format("OvLoad", gpu != null ? $"%{gpu.UsagePercentage}" : "–");
+            txtOvGpuClock.Text = Loc.Format("OvClock", gpu != null ? $"{Math.Round(gpu.CoreClockMhz)} MHz" : "–");
+            txtOvGpuPower.Text = Loc.Format("OvPower", FormatSensor(all, "GPU", SensorType.Power));
+
+            // Mini göstergeler
+            txtOvTileRam.Text = FormatSensor(all, "Memory", SensorType.Load);
+            var hotSpot = all.FirstOrDefault(x => x.Category == "GPU" && x.SensorType == SensorType.Temperature &&
+                                                  (x.RawName.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase) ||
+                                                   x.RawName.Contains("Hotspot", StringComparison.OrdinalIgnoreCase)));
+            txtOvTileHotSpot.Text = hotSpot?.FormattedValue ?? "–";
+            var fan = all.Where(x => x.SensorType == SensorType.Fan).OrderByDescending(x => x.Value).FirstOrDefault();
+            txtOvTileFan.Text = fan?.FormattedValue ?? "–";
+            txtOvTileCpuPower.Text = FormatSensor(all, "CPU", SensorType.Power);
+
+            DrawOverviewChart(snapshot);
+            RenderOverviewGame();
+        }
+
+        private static string FormatSensor(List<TelemetrySensorItem> all, string category, SensorType type)
+            => all.FirstOrDefault(x => x.Category == category && x.SensorType == type)?.FormattedValue ?? "–";
+
+        /// <summary>Halka göstergesi: 0–100 °C ölçeği, sınıra ulaşınca kırmızı.</summary>
+        private void SetGauge(System.Windows.Shapes.Ellipse ring, TextBlock label, float? temperature, int limit)
+        {
+            if (temperature is not float t || t <= 0)
+            {
+                ring.Visibility = Visibility.Hidden;
+                label.Text = "–";
+                return;
+            }
+
+            double fraction = Math.Clamp(t / 100.0, 0.01, 1.0);
+            double thickness = ring.StrokeThickness;
+            double diameter = Math.Max(1, (double.IsNaN(ring.ActualWidth) || ring.ActualWidth <= 0 ? 124 : ring.ActualWidth) - thickness);
+            double circumferenceInThickness = Math.PI * diameter / thickness;   // StrokeDashArray kalınlık birimindedir
+            ring.StrokeDashArray = new DoubleCollection { fraction * circumferenceInThickness, circumferenceInThickness * 2 };
+            ring.Stroke = (Brush)FindResource(t >= limit ? "Red" : "Accent");
+            ring.Visibility = Visibility.Visible;
+            label.Text = $"{Math.Round(t)}°";
+        }
+
+        /// <summary>Aktif oyun kartı: tepsinin takip ettiği oyun oturumu + uygulanan preset.</summary>
+        private void RenderOverviewGame()
+        {
+            string? game = _context.ActiveGame;
+            if (game != null)
+            {
+                string display = _context.Config.DiscoveredGameNames.TryGetValue(game, out var name) && !string.IsNullOrEmpty(name)
+                    ? name : game;
+                txtOvGameState.Text = Loc.Get("OvInGame");
+                txtOvGameState.Foreground = (Brush)FindResource("Accent");
+                dotOvGame.Fill = (Brush)FindResource("Accent");
+                runOvGame.Text = display;
+                runOvPreset.Text = string.IsNullOrEmpty(_lastPresetName) ? "" : "  ·  " + _lastPresetName;
+
+                var elapsed = DateTime.Now - (_context.ActiveGameSince ?? DateTime.Now);
+                txtOvSession.Text = $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
+                lblOvSession.Text = Loc.Get("OvSession");
+            }
+            else
+            {
+                txtOvGameState.Text = Loc.Get("OvDesktop");
+                txtOvGameState.Foreground = (Brush)FindResource("TxtSecond");
+                dotOvGame.Fill = (Brush)FindResource("TxtMuted");
+                runOvGame.Text = Loc.Get("OvDesktopHint");
+                runOvPreset.Text = "";
+                txtOvSession.Text = "";
+                lblOvSession.Text = "";
+            }
+        }
+
+        private void RenderOverviewChips()
+        {
+            void Chip(TextBlock value, string text, string brushKey)
+            {
+                value.Text = text;
+                value.Foreground = brushKey.StartsWith('#') ? BrushFrom(brushKey) : (Brush)FindResource(brushKey);
+            }
+            const string Good = "#7EE787", Warn = "#FFD166";
+
+            Chip(txtOvChipSonar, Loc.Get(_sonarConnected ? "OvConnected" : "OvDisconnected"), _sonarConnected ? Good : Warn);
+            Chip(txtOvChipAfterburner,
+                 _afterburnerFound == null ? "…" : Loc.Get(_afterburnerFound.Value ? "OvReady" : "OvMissing"),
+                 _afterburnerFound == true ? Good : Warn);
+            Chip(txtOvChipAlarm,
+                 _context.Config.TempAlarmEnabled ? $"{_context.Config.CpuTempLimit}° / {_context.Config.GpuTempLimit}°" : Loc.Get("OvOff"),
+                 "TxtPrimary");
+            Chip(txtOvChipPawnIo,
+                 _pawnIoInstalled == null ? "…" : Loc.Get(_pawnIoInstalled.Value ? "OvReady" : "OvMissing"),
+                 _pawnIoInstalled == true ? Good : Warn);
+            Chip(txtOvChipRecord, Loc.Get(_context.Recorder.IsRecording ? "OvRecording" : "OvIdle"),
+                 _context.Recorder.IsRecording ? "Red" : "TxtPrimary");
+
+            var update = _context.LastUpdateResult;
+            if (update is { Status: UpdateCheckStatus.UpdateAvailable, Update: { } pending })
+                Chip(txtOvChipUpdate, Loc.Format("OvUpdateAvailable", pending.Tag), "Accent");
+            else
+                Chip(txtOvChipUpdate, "v" + UpdateService.CurrentVersion.ToString(3), "TxtPrimary");
+        }
+
+        private void DrawOverviewChart(TelemetrySnapshot snapshot)
+        {
+            double width = cvsOverviewChart.ActualWidth, height = cvsOverviewChart.ActualHeight;
+            if (width <= 20 || height <= 20) return;
+            cvsOverviewChart.Children.Clear();
+
+            for (int i = 1; i <= 3; i++)
+            {
+                double y = height * i / 4.0;
+                cvsOverviewChart.Children.Add(new System.Windows.Shapes.Line
+                {
+                    X1 = 0, X2 = width, Y1 = y, Y2 = y,
+                    Stroke = BrushFrom("#1E1E27"), StrokeThickness = 1,
+                    StrokeDashArray = new DoubleCollection { 3, 4 }
+                });
+            }
+
+            var all = snapshot.AllSensors;
+            var cpu = all.FirstOrDefault(x => x.Category == "CPU" && x.SensorType == SensorType.Temperature);
+            var gpu = all.FirstOrDefault(x => x.Category == "GPU" && x.SensorType == SensorType.Temperature &&
+                                              x.RawName.Equals("GPU Core", StringComparison.OrdinalIgnoreCase))
+                      ?? all.FirstOrDefault(x => x.Category == "GPU" && x.SensorType == SensorType.Temperature);
+
+            float max = 100f;
+            foreach (var s in new[] { cpu, gpu })
+                if (s != null && s.History.Count > 0) max = Math.Max(max, s.History.Max() + 5);
+
+            void DrawLine(TelemetrySensorItem? sensor, Brush brush)
+            {
+                if (sensor == null || sensor.History.Count < 2) return;
+                var points = new PointCollection(sensor.History.Count);
+                double step = width / 59.0;
+                int count = sensor.History.Count;
+                for (int i = 0; i < count; i++)
+                {
+                    double x = width - (count - 1 - i) * step;
+                    double y = height - sensor.History[i] / max * (height - 8) - 4;
+                    points.Add(new Point(x, Math.Clamp(y, 2, height - 2)));
+                }
+                points.Freeze();
+                cvsOverviewChart.Children.Add(new System.Windows.Shapes.Polyline
+                {
+                    Points = points, Stroke = brush, StrokeThickness = 2.2, StrokeLineJoin = PenLineJoin.Round
+                });
+            }
+
+            DrawLine(gpu, new SolidColorBrush(OverviewGpuLineColor));
+            DrawLine(cpu, (Brush)FindResource("Accent"));
+        }
+
+        /// <summary>Tepsi oyun oturumu değiştiğinde çağırır (UI thread).</summary>
+        public void OnGameSessionChanged()
+        {
+            if (_currentPage == "overview" && IsVisible) RenderOverviewGame();
+        }
+
+        private void CvsOverviewChart_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (_lastOverviewSnapshot != null && _currentPage == "overview") DrawOverviewChart(_lastOverviewSnapshot);
+        }
+
+        private void BtnOvScan_Click(object sender, RoutedEventArgs e)
+        {
+            // Tarama sonucu kuralların yanında anlam kazanır: Sonar sayfasına geç ve orada tara
+            ShowPage("profiles");
+            BtnScan_Click(btnScan, e);
+        }
+
+        // ══════════════════════════════════════════════════════════════
         //  Temperature alarm settings
         // ══════════════════════════════════════════════════════════════
         private void ApplyTempLimitsFromUi()
@@ -948,6 +1171,7 @@ namespace Warden
             }
 
             var rec = _context.Recorder;
+            if (_currentPage == "overview") RenderOverviewChips();
             if (rec.IsRecording)
             {
                 string kind = rec.IsAutomatic ? Loc.Get("RecordKindAuto") : Loc.Get("RecordKindManual");
@@ -956,6 +1180,8 @@ namespace Warden
                 dotRecording.Fill = (Brush)FindResource("Red");
                 lblRecordBtn.Text = Loc.Get("RecordStop");
                 btnRecord.Style = (Style)FindResource("DangerButton");
+                lblOvRecord.Text = Loc.Get("OvRecordStop");
+                btnOvRecord.Style = (Style)FindResource("DangerButton");
             }
             else
             {
@@ -963,6 +1189,8 @@ namespace Warden
                 dotRecording.Fill = (Brush)FindResource("TxtMuted");
                 lblRecordBtn.Text = Loc.Get("RecordStart");
                 btnRecord.Style = (Style)FindResource("AccentButton");
+                lblOvRecord.Text = Loc.Get("OvRecordStart");
+                btnOvRecord.Style = (Style)FindResource("AccentButton");
             }
         }
 
@@ -1098,10 +1326,10 @@ namespace Warden
         {
             (string icon, string color) = check.State switch
             {
-                CheckState.Ok => ("✔", "#00C9B1"),
+                CheckState.Ok => ("✔", "#7EE787"),
                 CheckState.Warning => ("!", "#FACC15"),
                 CheckState.Error => ("✖", "#FF3B5C"),
-                _ => ("…", "#7A9A9A")
+                _ => ("…", "#A3A3B2")
             };
 
             var row = new Border
@@ -1317,7 +1545,25 @@ namespace Warden
             btnCloseTitle.ToolTip       = Loc.Get("ToolTipClose");
 
             // Sidebar Navigation Tooltips
+            btnNavOverview.ToolTip      = Loc.Get("NavOverview");
             btnNavHome.ToolTip          = Loc.Get("NavHome");
+            lblNavOverview.Text         = Loc.Get("NavShortOverview");
+            lblNavHome.Text             = Loc.Get("NavShortSonar");
+            lblNavDevice.Text           = Loc.Get("NavShortAudio");
+            lblNavGpu.Text              = Loc.Get("NavShortGpu");
+            lblNavTelemetry.Text        = Loc.Get("NavShortSensors");
+            lblNavStatus.Text           = Loc.Get("NavShortStatus");
+            lblNavSettings.Text         = Loc.Get("NavShortSettings");
+            lblOverviewHeader.Text      = Loc.Get("OvTitle");
+            lblOverviewDesc.Text        = Loc.Get("OvDesc");
+            lblOvScan.Text              = Loc.Get("OvScan");
+            lblOvGraph.Text             = Loc.Get("OvGraph");
+            lblOvTileRam.Text           = Loc.Get("OvTileRam");
+            lblOvTileHotSpot.Text       = Loc.Get("OvTileHotSpot");
+            lblOvTileFan.Text           = Loc.Get("OvTileFan");
+            lblOvTileCpuPower.Text      = Loc.Get("OvTileCpuPower");
+            lblOvChipRecord.Text        = Loc.Get("OvChipRecord");
+            lblOvChipUpdate.Text        = Loc.Get("OvChipUpdate");
             btnNavDevice.ToolTip        = Loc.Get("NavDeviceManager");
             btnNavGpu.ToolTip           = Loc.Get("NavGpuMonitor");
             btnNavTelemetry.ToolTip     = Loc.Get("NavTelemetry");
@@ -1409,6 +1655,7 @@ namespace Warden
         {
             bool visible = IsVisible;
             _context.SetUiTelemetryDemand("ui-telemetry", visible && _currentPage == "telemetry");
+            _context.SetUiTelemetryDemand("ui-overview", visible && _currentPage == "overview");
             _context.SetUiTelemetryDemand("ui-gpu", visible && _currentPage == "gpu");
             _context.SetUiTelemetryDemand("ui-status", visible && _currentPage == "status");
 
@@ -1444,7 +1691,13 @@ namespace Warden
                 return;
             }
 
-            if (!IsVisible || _currentPage != "telemetry") return;
+            if (!IsVisible) return;
+            if (_currentPage == "overview")
+            {
+                RenderOverview(snapshot);
+                return;
+            }
+            if (_currentPage != "telemetry") return;
 
             _lastTelemetrySnapshot = snapshot;
             RenderFavorites(snapshot.Favorites);
@@ -1485,8 +1738,8 @@ namespace Warden
             {
                 var card = new Border
                 {
-                    Background = BrushFrom("#081517"),
-                    BorderBrush = BrushFrom("#16363B"),
+                    Background = BrushFrom("#101016"),
+                    BorderBrush = BrushFrom("#2A2A35"),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(12, 8, 12, 8),
@@ -1502,7 +1755,7 @@ namespace Warden
 
                 var badgeBorder = new Border
                 {
-                    Background = BrushFrom("#103035"),
+                    Background = BrushFrom("#2A1C10"),
                     CornerRadius = new CornerRadius(4),
                     Padding = new Thickness(5, 1, 5, 1),
                     HorizontalAlignment = HorizontalAlignment.Left
@@ -1616,8 +1869,8 @@ namespace Warden
             {
                 var badge = new Border
                 {
-                    Background = BrushFrom("#0A1618"),
-                    BorderBrush = BrushFrom("#183338"),
+                    Background = BrushFrom("#101016"),
+                    BorderBrush = BrushFrom("#2A2A35"),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(8, 4, 8, 4),
@@ -1641,7 +1894,7 @@ namespace Warden
                 var txt = new TextBlock
                 {
                     Text = $"{s.Name}: {s.FormattedValue}",
-                    Foreground = BrushFrom("#C5DCDE"),
+                    Foreground = BrushFrom("#D6D6E0"),
                     FontSize = 10,
                     FontWeight = FontWeights.SemiBold,
                     VerticalAlignment = VerticalAlignment.Center
@@ -1651,7 +1904,7 @@ namespace Warden
                 var btnRemove = new Button
                 {
                     Content = "✕",
-                    Foreground = BrushFrom("#607B80"),
+                    Foreground = BrushFrom("#7A7A88"),
                     Background = Brushes.Transparent,
                     BorderThickness = new Thickness(0),
                     Margin = new Thickness(6, 0, 0, 0),
@@ -1774,9 +2027,9 @@ namespace Warden
                         {
                             row.txtVal.Text = item.FormattedValue;
                             row.btnStar.Content = item.IsFavorite ? "★" : "☆";
-                            row.btnStar.Foreground = BrushFrom(item.IsFavorite ? "#FACC15" : "#3E565B");
+                            row.btnStar.Foreground = BrushFrom(item.IsFavorite ? "#FACC15" : "#4A4A58");
                             row.btnStar.ToolTip = item.IsFavorite ? Loc.Get("UnpinFromFavorites") : Loc.Get("PinToFavorites");
-                            row.btnGraph.Foreground = BrushFrom(item.IsOnGraph ? item.GraphColor : "#3E565B");
+                            row.btnGraph.Foreground = BrushFrom(item.IsOnGraph ? item.GraphColor : "#4A4A58");
                             row.btnGraph.ToolTip = item.IsOnGraph ? Loc.Get("RemoveFromGraph") : Loc.Get("PlotOnGraph");
                         }
                     }
@@ -1868,7 +2121,7 @@ namespace Warden
                         Content = item.IsFavorite ? "★" : "☆",
                         Foreground = item.IsFavorite 
                             ? BrushFrom("#FACC15") 
-                            : BrushFrom("#3E565B"),
+                            : BrushFrom("#4A4A58"),
                         Background = Brushes.Transparent,
                         BorderThickness = new Thickness(0),
                         Cursor = Cursors.Hand,
@@ -1892,7 +2145,7 @@ namespace Warden
                         Content = "📈",
                         Foreground = item.IsOnGraph
                             ? BrushFrom(item.GraphColor)
-                            : BrushFrom("#3E565B"),
+                            : BrushFrom("#4A4A58"),
                         Background = Brushes.Transparent,
                         BorderThickness = new Thickness(0),
                         Cursor = Cursors.Hand,
@@ -1962,7 +2215,7 @@ namespace Warden
                     Y1 = y,
                     X2 = width,
                     Y2 = y,
-                    Stroke = BrushFrom("#0E1D20"),
+                    Stroke = BrushFrom("#1C1C24"),
                     StrokeThickness = 1,
                     StrokeDashArray = new DoubleCollection { 3, 3 }
                 };
@@ -1979,6 +2232,8 @@ namespace Warden
             { Dispatcher.BeginInvoke(new Action<string, string>(UpdateActivePreset), ruleName, presetName); return; }
 
             bool isGame = ruleName != "Desktop";
+            _lastPresetName = presetName;
+            if (_currentPage == "overview" && IsVisible) RenderOverviewGame();
             string label = isGame
                 ? $"{ruleName}  →  {presetName}"
                 : $"{Loc.Get("Desktop")} ({presetName})";

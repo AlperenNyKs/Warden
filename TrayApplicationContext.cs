@@ -802,7 +802,8 @@ namespace Warden
             bool uiTelemetry, anyUi;
             lock (_uiTelemetryDemand)
             {
-                uiTelemetry = _uiTelemetryDemand.Contains("ui-telemetry");
+                // Telemetri ve Panel sayfaları tüm sensörleri saniyede bir gösterir
+                uiTelemetry = _uiTelemetryDemand.Contains("ui-telemetry") || _uiTelemetryDemand.Contains("ui-overview");
                 anyUi = _uiTelemetryDemand.Count > 0;
             }
             bool recording = Recorder.IsRecording;
@@ -872,8 +873,16 @@ namespace Warden
 
         // ── Oturum kaydı ────────────────────────────────────────────────
 
+        /// <summary>Ön planda kuralı olan oyun (yoksa null) ve oturumun başlangıcı — Panel sayfası gösterir.</summary>
+        public string? ActiveGame { get; private set; }
+        public DateTime? ActiveGameSince { get; private set; }
+
         private void OnGameSessionChanged(string? game)
         {
+            ActiveGame = game;
+            ActiveGameSince = game != null ? DateTime.Now : null;
+            _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.OnGameSessionChanged()));
+
             if (!Config.AutoRecordGameSessions) return;
             try
             {

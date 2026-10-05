@@ -39,26 +39,28 @@ dotnet run -c Release
 1. **Arayüzü Açma:**
    - Ekranın sağ altındaki bildirim alanında (saatin yanında) **Warden kalkan ikonuna** tıklayın.
 
-2. **Profilleri Ayarlama (🎧):**
+2. **Panel:**
+   - Uygulama bu sayfayla açılır. Aktif oyun ve oturum süresi, CPU/GPU sıcaklık göstergeleri, son 60 saniyelik sıcaklık grafiği, bellek / GPU hot spot / fan / CPU gücü ve bağlantı durumları tek ekranda. Buradan kayıt başlatabilir veya oyunları tarayabilirsin.
+
+3. **Profilleri Ayarlama (Sonar):**
    - **"Yüklü Oyunları Tara"** butonuna basarak oyunları otomatik tespit edin.
    - Her oyunun karşısındaki menüden SteelSeries Sonar profilini eşleştirin.
 
-0. **Sistem Durumu (🩺):**
-   - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir.
-
-3. **Sistem Telemetrisi (📊):**
+4. **Sistem Telemetrisi (Sensörler):**
    - CPU ve GPU sıcaklıkları, saat hızları, watt tüketimleri ve kullanım oranlarını canlı izleyin.
    - İstediğiniz metriğin yanındaki `★` butonuna basarak üstteki Hızlı Bakış alanına sabitleyin.
    - `📈` butonuna basarak 60 saniyelik canlı grafiğe dahil edin.
-
    - **Kayıt:** "⏺ Kaydı başlat" ile o anki değerleri CSV dosyasına yazar (Excel ile açılır). "Kuralı olan bir oyun açıkken otomatik kaydet" seçiliyse oyun açılınca başlar, kapanınca durur. Dosyalar: `%AppData%\Warden\sessions`.
    - **Sıcaklık alarmı (Ayarlar):** CPU veya GPU sıcaklığı 10 saniye boyunca sınırın (varsayılan CPU 90°C, GPU 85°C) üstünde kalırsa bildirim gelir.
 
-4. **GPU Monitör & Afterburner (⚡):**
+5. **GPU Monitör & Afterburner (GPU):**
    - NVIDIA, AMD ve Intel ekran kartlarını destekler. GPU saat hızı belirlenen sınırı aştığında hedef MSI Afterburner profilini otomatik uygular (Afterburner farklı bir klasöre kuruluysa da bulunur).
 
-5. **Aygıt Yöneticisi (🔇):**
+6. **Aygıt Yöneticisi (Ses):**
    - İstemediğiniz sanal veya hayalet ses aygıtlarını arka planda otomatik devre dışı bırakır.
 
-6. **Kapatma:**
+7. **Sistem Durumu (Durum):**
+   - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir.
+
+8. **Kapatma:**
    - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Çıkış"** (İngilizcede "Exit") diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.
