@@ -122,9 +122,25 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         //  Window chrome
         // ══════════════════════════════════════════════════════════════
-        private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+        private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+        private const int DWMWCP_ROUND = 2;
+
+        protected override void OnSourceInitialized(EventArgs e)
         {
-            if (e.LeftButton == MouseButtonState.Pressed) DragMove();
+            base.OnSourceInitialized(e);
+
+            // Windows 11: köşeleri DWM yuvarlasın (eskiden şeffaf pencere + CornerRadius ile yapılıyordu).
+            // Windows 10'da çağrı hata döndürür ve köşeler düz kalır.
+            try
+            {
+                IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                int pref = DWMWCP_ROUND;
+                DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+            }
+            catch { }
         }
 
         private void MinimizeButton_Click(object sender, RoutedEventArgs e)
@@ -137,7 +153,13 @@ namespace Warden
             {
                 Hide();
                 WindowState = WindowState.Normal;
+                return;
             }
+
+            // WindowChrome ile büyütülen pencere, yeniden boyutlandırma kenarı kadar ekran dışına taşar → telafi et
+            rootBorder.Margin = WindowState == WindowState.Maximized
+                ? SystemParameters.WindowResizeBorderThickness
+                : new Thickness(0);
         }
 
         private void MaximizeButton_Click(object sender, RoutedEventArgs e)

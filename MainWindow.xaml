@@ -4,13 +4,18 @@
         Title="Warden"
         Height="640" Width="940"
         MinHeight="580" MinWidth="840"
-        WindowStyle="None"
-        AllowsTransparency="True"
-        Background="Transparent"
+        Background="#080C0E"
         ResizeMode="CanResizeWithGrip"
         WindowStartupLocation="CenterScreen"
         Topmost="False"
         ShowInTaskbar="True">
+
+    <!-- WindowChrome: AllowsTransparency (layered pencere, pahalı render) yerine özel başlık çubuğu.
+         Sürükleme, çift tıkla büyütme ve Aero Snap Windows tarafından yapılır; büyütünce görev çubuğu kapanmaz. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="38" ResizeBorderThickness="6" CornerRadius="0"
+                      GlassFrameThickness="0,0,0,1" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
 
     <Window.Resources>
         <!-- ── Warden Color Palette (Turquoise Dark Dashboard) ── -->
@@ -403,7 +408,7 @@
     </Window.Resources>
 
     <!-- ── Main Outer Border ── -->
-    <Border Background="{StaticResource BgMain}" CornerRadius="12"
+    <Border x:Name="rootBorder" Background="{StaticResource BgMain}"
             BorderBrush="{StaticResource Border}" BorderThickness="1">
         <Grid>
             <Grid.RowDefinitions>
@@ -412,7 +417,7 @@
             </Grid.RowDefinitions>
 
             <!-- ── Top TitleBar & Window Controls ── -->
-            <Grid Background="Transparent" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Grid Background="Transparent">
                 <!-- Left Title Branding -->
                 <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
                     <Border Width="22" Height="22" CornerRadius="6" Margin="0,0,10,0" ClipToBounds="True">
@@ -434,7 +439,8 @@
                 </StackPanel>
 
                 <!-- Right Standard Windows 11 Buttons -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
                     <!-- Minimize -->
                     <Button x:Name="btnMinimizeTitle" Style="{StaticResource Win11TitleButton}" Click="MinimizeButton_Click" ToolTip="Küçült">
                         <Path Stroke="{StaticResource TxtSecond}" StrokeThickness="1.2"
