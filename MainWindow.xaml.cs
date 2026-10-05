@@ -227,6 +227,12 @@ namespace Warden
         /// <summary>İlk açılışta tepsi çağırır: durum sayfasını göster.</summary>
         public void ShowStatusPage() => ShowPage("status");
 
+        /// <summary>Oyun taraması bildirimine tıklanınca tepsi çağırır.</summary>
+        public void ShowProfilesPage() => ShowPage("profiles");
+
+        /// <summary>Arka plan taraması oyun listesini/kuralları değiştirince tepsi çağırır.</summary>
+        public void RefreshGameList() => RenderRulesList();
+
         private void BtnNavTelemetry_Click(object sender, RoutedEventArgs e)
             => ShowPage("telemetry");
 
@@ -283,6 +289,8 @@ namespace Warden
                 txtInterval.Text   = _context.Config.CheckIntervalMilliseconds.ToString();
                 chkStartup.IsChecked = _context.Config.StartWithWindows;
                 chkAutoUpdate.IsChecked = _context.Config.AutoCheckUpdates;
+                chkAutoScan.IsChecked = _context.Config.AutoScanGames;
+                chkAutoAssign.IsChecked = _context.Config.AutoAssignGgPresets;
                 chkTempAlarm.IsChecked = _context.Config.TempAlarmEnabled;
                 txtCpuTempLimit.Text = _context.Config.CpuTempLimit.ToString();
                 txtGpuTempLimit.Text = _context.Config.GpuTempLimit.ToString();
@@ -668,49 +676,19 @@ namespace Warden
 
             try
             {
-                var games = await Task.Run(GameScanner.ScanAllGames);
-
-                // Kaldırılmış oyunların listesi ve kuralları temizlenir
-                int removed = _context.Config.PruneUninstalledGames(games.Select(g => g.ExeName)).Count;
-
-                int added = 0;
-                foreach (var g in games)
+                // Tarama, kaldırılan oyunların silinmesi ve GG profili ataması açılış taramasıyla ortak
+                var result = await _context.SyncGamesAsync();
+                if (result == null)
                 {
-                    if (!_context.Config.DiscoveredGames.Contains(g.ExeName, StringComparer.OrdinalIgnoreCase))
-                    {
-                        _context.Config.DiscoveredGames.Add(g.ExeName);
-                        added++;
-                    }
-                    if (!string.IsNullOrEmpty(g.GameName))
-                    {
-                        _context.Config.DiscoveredGameNames[g.ExeName] = g.GameName;
-                    }
+                    scanResult = Loc.Get("ScanBusy");
                 }
-
-                // GG'de birebir oyun profili olan oyunlara kural otomatik atanır; mevcut kurallara dokunulmaz.
-                // Preset listesi yüklenmediyse (GG kapalı) yalnızca oyunlar listeye eklenir.
-                int matched = 0;
-                if (_presetsLoaded)
+                else
                 {
-                    var unruled = games.Where(g => !string.IsNullOrEmpty(g.GameName) &&
-                                                   !_context.Config.Rules.ContainsKey(g.ExeName)).ToList();
-                    var matches = SonarPresetMatcher.MatchGames(unruled.Select(g => g.GameName), _availablePresets);
-                    foreach (var g in unruled)
-                    {
-                        if (!matches.TryGetValue(g.GameName, out var preset)) continue;
-                        _context.Config.Rules[g.ExeName] = preset.id;
-                        matched++;
-                    }
+                    // Sonuç, kimsenin görmediği sol alttaki küçük kutu yerine butonun üzerinde gösterilir
+                    scanResult = result.Added.Count > 0 ? Loc.Format("ScanDone", result.Added.Count) : Loc.Get("ScanNone");
+                    if (result.Assigned.Count > 0) scanResult += " · " + Loc.Format("ScanMatched", result.Assigned.Count);
+                    if (result.Removed.Count > 0) scanResult += " · " + Loc.Format("ScanRemoved", result.Removed.Count);
                 }
-
-                _context.SaveConfig();
-                if (matched > 0 || removed > 0) _context.ReloadConfig();
-                RenderRulesList();
-
-                // Sonuç, kimsenin görmediği sol alttaki küçük kutu yerine butonun üzerinde gösterilir
-                scanResult = added > 0 ? Loc.Format("ScanDone", added) : Loc.Get("ScanNone");
-                if (matched > 0) scanResult += " · " + Loc.Format("ScanMatched", matched);
-                if (removed > 0) scanResult += " · " + Loc.Format("ScanRemoved", removed);
             }
             catch (Exception ex)
             {
@@ -747,6 +725,8 @@ namespace Warden
 
             _context.Config.StartWithWindows = chkStartup.IsChecked == true;
             _context.Config.AutoCheckUpdates = chkAutoUpdate.IsChecked == true;
+            _context.Config.AutoScanGames = chkAutoScan.IsChecked == true;
+            _context.Config.AutoAssignGgPresets = chkAutoAssign.IsChecked == true;
             _context.Config.TempAlarmEnabled = chkTempAlarm.IsChecked == true;
             ApplyTempLimitsFromUi();
 
@@ -1651,6 +1631,11 @@ namespace Warden
             lblUpdatesSection.Text      = Loc.Get("UpdatesSection");
             lblUpdateAutoCheck.Text     = Loc.Get("UpdateAutoCheck");
             lblUpdateAutoCheckDesc.Text = Loc.Get("UpdateAutoCheckDesc");
+            lblGamesSection.Text        = Loc.Get("GamesSection");
+            lblAutoScan.Text            = Loc.Get("AutoScan");
+            lblAutoScanDesc.Text        = Loc.Get("AutoScanDesc");
+            lblAutoAssign.Text          = Loc.Get("AutoAssign");
+            lblAutoAssignDesc.Text      = Loc.Get("AutoAssignDesc");
             lblCheckUpdates.Text        = Loc.Get("BtnCheckUpdates");
             txtCurrentVersion.Text      = Loc.Format("UpdateCurrentVersion", UpdateService.CurrentVersion.ToString(3));
             ShowUpdateStatus(_context.LastUpdateResult, fromLanguageChange: true);

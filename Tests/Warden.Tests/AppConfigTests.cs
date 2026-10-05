@@ -163,3 +163,81 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class GameLibrarySyncTests
+    {
+        private static DiscoveredGame G(string exe, string name) => new() { ExeName = exe, GameName = name, Source = "Steam" };
+        private static readonly SonarConfig[] Presets =
+        {
+            new() { id = "wt", name = "War Thunder", virtualAudioDevice = "game", isPreset = true },
+            new() { id = "hunt", name = "Hunt: Showdown", virtualAudioDevice = "game", isPreset = true },
+        };
+
+        [Fact]
+        public void Apply_AddsNewGamesAndAssignsGgProfiles()
+        {
+            var cfg = new AppConfig();
+            var r = GameLibrarySync.Apply(cfg, new[] { G("aces.exe", "War Thunder"), G("squad.exe", "Squad") }, Presets);
+
+            Assert.Equal(new[] { "War Thunder", "Squad" }, r.Added);
+            Assert.Equal(new[] { "War Thunder" }, r.Assigned);
+            Assert.Equal("wt", cfg.Rules["aces.exe"]);
+            Assert.False(cfg.Rules.ContainsKey("squad.exe"));
+        }
+
+        [Fact]
+        public void Apply_DoesNotReassignAProfileTheUserDeleted()
+        {
+            var cfg = new AppConfig();
+            var games = new[] { G("aces.exe", "War Thunder") };
+            GameLibrarySync.Apply(cfg, games, Presets);
+            cfg.Rules.Remove("aces.exe");
+
+            var r = GameLibrarySync.Apply(cfg, games, Presets);
+
+            Assert.False(r.HasChanges);
+            Assert.False(cfg.Rules.ContainsKey("aces.exe"));
+        }
+
+        [Fact]
+        public void Apply_KeepsExistingRulesAndSkipsAssignmentWithoutGg()
+        {
+            var cfg = new AppConfig();
+            cfg.Rules["aces.exe"] = "mine";
+            var games = new[] { G("aces.exe", "War Thunder"), G("hunt.exe", "Hunt: Showdown 1896") };
+
+            var r = GameLibrarySync.Apply(cfg, games, presets: null);
+            Assert.Empty(r.Assigned);
+
+            GameLibrarySync.Apply(cfg, games, Presets);   // GG sonradan açıldı
+            Assert.Equal("mine", cfg.Rules["aces.exe"]);
+            Assert.Equal("hunt", cfg.Rules["hunt.exe"]);
+        }
+
+        [Fact]
+        public void Apply_AutoAssignOffAddsGamesOnly()
+        {
+            var cfg = new AppConfig { AutoAssignGgPresets = false };
+            var r = GameLibrarySync.Apply(cfg, new[] { G("aces.exe", "War Thunder") }, Presets);
+
+            Assert.Single(r.Added);
+            Assert.Empty(cfg.Rules);
+        }
+
+        [Fact]
+        public void Apply_ReinstalledGameGetsProfileAgain()
+        {
+            var cfg = new AppConfig();
+            GameLibrarySync.Apply(cfg, new[] { G("aces.exe", "War Thunder"), G("hunt.exe", "Hunt: Showdown") }, Presets);
+            cfg.Rules.Remove("aces.exe");                                                    // kullanıcı sildi
+
+            var removed = GameLibrarySync.Apply(cfg, new[] { G("hunt.exe", "Hunt: Showdown") }, Presets);   // oyun kaldırıldı
+            Assert.Equal(new[] { "War Thunder" }, removed.Removed);
+
+            var r = GameLibrarySync.Apply(cfg, new[] { G("aces.exe", "War Thunder"), G("hunt.exe", "Hunt: Showdown") }, Presets);
+            Assert.Equal(new[] { "War Thunder" }, r.Assigned);
+        }
+    }
+}

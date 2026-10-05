@@ -52,9 +52,14 @@ namespace Warden
         private UpdateInfo? _pendingUpdate;
         private Version? _lastNotifiedUpdate;
         private bool _lastBalloonIsUpdate;
-        private int _updateBusy;                       // kontrol/kurulum aynı anda iki kez çalışmasın
+        private bool _lastBalloonIsGameScan;
+        private int _updateBusy;                      // kontrol/kurulum aynı anda iki kez çalışmasın
         private static readonly TimeSpan UpdateFirstCheckDelay = TimeSpan.FromMinutes(1);
         private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(6);
+
+        // Oyun taraması: açılışta diske yük bindirmemek ve GG'nin hazır olması için gecikmeli
+        private int _gameScanBusy;
+        private static readonly TimeSpan AutoScanDelay = TimeSpan.FromSeconds(30);
 
         /// <summary>Son kontrol sonucu (ayarlar sayfası açılınca gösterilir).</summary>
         public UpdateCheckResult? LastUpdateResult { get; private set; }
@@ -111,6 +116,11 @@ namespace Warden
             {
                 if (_lastBalloonIsUpdate && _pendingUpdate != null)
                     _ = ConfirmAndInstallUpdateAsync();
+                else if (_lastBalloonIsGameScan)
+                {
+                    ShowMainWindow();
+                    _mainWindow?.ShowProfilesPage();
+                }
             };
 
             // 2. Context Menu (metinler her açılışta seçili dile göre yenilenir)
@@ -136,6 +146,9 @@ namespace Warden
             // 4. Güncelleme kontrolü (önceki güncellemeden kalan setup dosyalarını da temizler)
             UpdateService.CleanupOldDownloads();
             ApplyUpdateSchedule();
+
+            // 4b. Yüklü oyunları arka planda tara (yeni / kaldırılan oyunlar, GG profili ataması)
+            _ = AutoScanGamesOnStartupAsync();
 
             // 5. Pre-create MainWindow on background idle dispatcher so opening from tray is instantaneous (0ms)
             _app.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
@@ -587,6 +600,67 @@ namespace Warden
                             Loc.Get("StartupInsecureTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
+        // ── Oyun taraması ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Yüklü oyunları tarar ve sonucu config'e işler (UI thread'inde). GG'ye ulaşılamazsa oyunlar yine eklenir,
+        /// yalnızca profil ataması yapılmaz. Başka bir tarama sürüyorsa null döner.
+        /// </summary>
+        public async Task<GameSyncResult?> SyncGamesAsync()
+        {
+            if (Interlocked.CompareExchange(ref _gameScanBusy, 1, 0) != 0) return null;
+            try
+            {
+                var games = await Task.Run(GameScanner.ScanAllGames);
+
+                List<SonarConfig>? presets = null;
+                try { presets = await _client.GetConfigsAsync(); }
+                catch (Exception ex) { Log($"[Game scan] GG presets unavailable, skipping profile assignment: {ex.Message}"); }
+
+                GameSyncResult result = null!;
+                await _app.Dispatcher.InvokeAsync(() =>
+                {
+                    result = GameLibrarySync.Apply(Config, games, presets);
+                    SaveConfig();
+                    if (result.HasChanges) ReloadConfig();
+                    _mainWindow?.RefreshGameList();
+                });
+
+                Log($"[Game scan] {games.Count} games; added {result.Added.Count}, GG profile assigned {result.Assigned.Count}, removed {result.Removed.Count}.");
+                return result;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _gameScanBusy, 0);
+            }
+        }
+
+        private async Task AutoScanGamesOnStartupAsync()
+        {
+            try
+            {
+                await Task.Delay(AutoScanDelay);
+                if (!Config.AutoScanGames) return;
+
+                var result = await SyncGamesAsync();
+                if (result == null || !result.HasChanges) return;
+
+                var lines = new List<string>();
+                if (result.Added.Count > 0)    lines.Add(Loc.Format("AutoScanAdded", JoinNames(result.Added)));
+                if (result.Assigned.Count > 0) lines.Add(Loc.Format("AutoScanAssigned", JoinNames(result.Assigned)));
+                if (result.Removed.Count > 0)  lines.Add(Loc.Format("AutoScanRemoved", JoinNames(result.Removed)));
+                ShowBalloon(8000, string.Join("\n", lines), ToolTipIcon.Info, isGameScan: true);
+            }
+            catch (Exception ex)
+            {
+                Log($"[Game scan] Startup scan failed: {ex.Message}");
+            }
+        }
+
+        // Balon bildirimi metni ~255 karakterle sınırlı: ilk 3 ad + "+N"
+        private static string JoinNames(List<string> names)
+            => string.Join(", ", names.Take(3)) + (names.Count > 3 ? $" +{names.Count - 3}" : "");
+
         // ── Güncellemeler ───────────────────────────────────────────────
 
         /// <summary>Otomatik kontrol ayarına göre zamanlayıcıyı başlatır/durdurur.</summary>
@@ -757,13 +831,14 @@ namespace Warden
         /// NotifyIcon bir WinForms nesnesidir ve thread-safe değildir; watcher/timer thread'lerinden
         /// gelen bildirimler UI thread'ine yönlendirilir.
         /// </summary>
-        private void ShowBalloon(int timeoutMs, string text, ToolTipIcon icon, bool isUpdate = false)
+        private void ShowBalloon(int timeoutMs, string text, ToolTipIcon icon, bool isUpdate = false, bool isGameScan = false)
         {
             _app.Dispatcher.BeginInvoke(new Action(() =>
             {
                 try
                 {
                     _lastBalloonIsUpdate = isUpdate;
+                    _lastBalloonIsGameScan = isGameScan;
                     if (_trayIcon.Visible)
                         _trayIcon.ShowBalloonTip(timeoutMs, "Warden", text, icon);
                 }

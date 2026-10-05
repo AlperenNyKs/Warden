@@ -21,6 +21,13 @@ namespace Warden
         // Oyun tarayıcısının bulduğu exe'ler (manuel eklenenler burada olmaz). null = alan eklenmeden önceki config.
         public List<string>? ScannedGames { get; set; }
 
+        // Açılışta yüklü oyunları tara; bulunan oyunlara GG'deki oyun profilini otomatik ata
+        public bool AutoScanGames { get; set; } = true;
+        public bool AutoAssignGgPresets { get; set; } = true;
+
+        // GG profili otomatik atanmış exe'ler: kullanıcı bu kuralı silerse bir daha atanmaz
+        public List<string> GgAutoAssigned { get; set; } = new();
+
         // GPU Monitor
         public double TargetMhz { get; set; } = 1550;
         public int TargetProfile { get; set; } = 1;
@@ -79,6 +86,9 @@ namespace Warden
             ScannedGames = ScannedGames?.Where(g => !string.IsNullOrWhiteSpace(g))
                                         .Distinct(StringComparer.OrdinalIgnoreCase)
                                         .ToList();
+            GgAutoAssigned = (GgAutoAssigned ?? new()).Where(g => !string.IsNullOrWhiteSpace(g))
+                                                      .Distinct(StringComparer.OrdinalIgnoreCase)
+                                                      .ToList();
 
             DisabledDevices ??= new();
             DisabledDeviceNames ??= new();
@@ -120,6 +130,8 @@ namespace Warden
                 DiscoveredGames.RemoveAll(g => g.Equals(exe, StringComparison.OrdinalIgnoreCase));
                 DiscoveredGameNames.Remove(exe);
                 Rules.Remove(exe);
+                // Yeniden kurulursa profil tekrar atanabilsin
+                GgAutoAssigned.RemoveAll(g => g.Equals(exe, StringComparison.OrdinalIgnoreCase));
             }
 
             ScannedGames = found.ToList();

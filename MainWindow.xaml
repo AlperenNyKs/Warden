@@ -1372,6 +1372,51 @@
                                         </Grid>
                                     </Border>
 
+                                    <!-- ── Oyun taraması ── -->
+                                    <TextBlock x:Name="lblGamesSection" Text="OYUNLAR"
+                                               Foreground="{StaticResource TxtSecond}"
+                                               FontSize="10" FontWeight="Bold" Margin="0,22,0,12"/>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblAutoScan" Text="Açılışta yüklü oyunları tara"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblAutoScanDesc"
+                                                           Text="Yeni ve kaldırılan oyunları bulur, değişiklik varsa bildirim gösterir."
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkAutoScan" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblAutoAssign" Text="GG oyun profillerini otomatik ata"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblAutoAssignDesc"
+                                                           Text="SteelSeries GG'de oyuna özel profili olan oyunlara o profili atar. Var olan kurallara dokunmaz."
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkAutoAssign" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
                                     <!-- ── Güncellemeler ── -->
                                     <TextBlock x:Name="lblUpdatesSection" Text="GÜNCELLEMELER"
                                                Foreground="{StaticResource TxtSecond}"

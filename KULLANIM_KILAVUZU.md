@@ -43,8 +43,9 @@ dotnet run -c Release
    - Uygulama bu sayfayla açılır. Aktif oyun ve oturum süresi, CPU/GPU sıcaklık göstergeleri, son 60 saniyelik sıcaklık grafiği, bellek / GPU hot spot / fan / CPU gücü ve bağlantı durumları tek ekranda. Buradan kayıt başlatabilir veya oyunları tarayabilirsin.
 
 3. **Profilleri Ayarlama (Sonar):**
-   - **"Yüklü Oyunları Tara"** butonuna basarak oyunları otomatik tespit edin.
-   - SteelSeries GG'de oyuna özel bir profili olan oyunlara (ör. "Valorant Pro Preset", "War Thunder") o profil otomatik atanır. Var olan kurallarınız değiştirilmez.
+   - Warden açıldıktan yaklaşık 30 saniye sonra yüklü oyunları kendisi tarar. Yeni veya kaldırılmış oyun varsa bildirim gösterir; bildirime tıklayınca bu sayfa açılır. Ayarlar → Oyunlar bölümünden kapatılabilir.
+   - İstediğiniz an **"Yüklü Oyunları Tara"** butonuyla elle de tarayabilirsiniz.
+   - SteelSeries GG'de oyuna özel bir profili olan oyunlara (ör. "Valorant Pro Preset", "War Thunder") o profil otomatik atanır. Var olan kurallarınız değiştirilmez; otomatik atanan bir kuralı silerseniz tekrar atanmaz.
    - Bilgisayardan kaldırılan oyunlar bir sonraki taramada listeden ve kurallardan silinir. Elle eklediğiniz oyunlara dokunulmaz.
    - Diğer oyunlar için karşısındaki menüden SteelSeries Sonar profilini eşleştirin.
 
