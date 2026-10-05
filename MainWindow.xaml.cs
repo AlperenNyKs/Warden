@@ -78,19 +78,29 @@ namespace Warden
                 else
                     StopTelemetry();
 
+                // Gizli pencerede sonsuz animasyon boşuna çalışmasın
+                if (_pulseAnimation != null)
+                {
+                    if (this.IsVisible) _pulseAnimation.Resume(ledStatus);
+                    else _pulseAnimation.Pause(ledStatus);
+                }
+
                 // GG açılışta kapalıysa preset listesi boş kalıyordu; pencere her açıldığında tekrar dene
                 if (this.IsVisible)
+                {
                     RefreshPresetsIfNeeded();
+                    if (_lastGpuData != null) UpdateGpuData(_lastGpuData);
+                }
             };
 
             LoadInitialConfig();
             _ = LoadSonarPresetsAsync();
 
-            // Status LED pulse animasyonunu başlat
+            // Status LED pulse animasyonunu başlat (kontrol edilebilir: pencere gizliyken duraklatılır)
             Loaded += (s, e) =>
             {
-                var sb = (System.Windows.Media.Animation.Storyboard)FindResource("PulseAnimation");
-                sb.Begin(ledStatus);
+                _pulseAnimation = (System.Windows.Media.Animation.Storyboard)FindResource("PulseAnimation");
+                _pulseAnimation.Begin(ledStatus, isControllable: true);
             };
         }
 
@@ -118,13 +128,31 @@ namespace Warden
             }
         }
         private bool _isSavingSize = false;
+        private System.Windows.Media.Animation.Storyboard? _pulseAnimation;
+        private GpuData? _lastGpuData;
 
         // ══════════════════════════════════════════════════════════════
         //  Window chrome
         // ══════════════════════════════════════════════════════════════
-        private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+        private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+        private const int DWMWCP_ROUND = 2;
+
+        protected override void OnSourceInitialized(EventArgs e)
         {
-            if (e.LeftButton == MouseButtonState.Pressed) DragMove();
+            base.OnSourceInitialized(e);
+
+            // Windows 11: köşeleri DWM yuvarlasın (eskiden şeffaf pencere + CornerRadius ile yapılıyordu).
+            // Windows 10'da çağrı hata döndürür ve köşeler düz kalır.
+            try
+            {
+                IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                int pref = DWMWCP_ROUND;
+                DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+            }
+            catch { }
         }
 
         private void MinimizeButton_Click(object sender, RoutedEventArgs e)
@@ -137,7 +165,13 @@ namespace Warden
             {
                 Hide();
                 WindowState = WindowState.Normal;
+                return;
             }
+
+            // WindowChrome ile büyütülen pencere, yeniden boyutlandırma kenarı kadar ekran dışına taşar → telafi et
+            rootBorder.Margin = WindowState == WindowState.Maximized
+                ? SystemParameters.WindowResizeBorderThickness
+                : new Thickness(0);
         }
 
         private void MaximizeButton_Click(object sender, RoutedEventArgs e)
@@ -324,6 +358,14 @@ namespace Warden
             _ = LoadSonarPresetsAsync();
         }
 
+        /// <summary>"Windows ile başlat" kutusunu, kaydetme olaylarını tetiklemeden günceller.</summary>
+        public void SetStartupChecked(bool isChecked)
+        {
+            _isPopulatingControls = true;
+            try { chkStartup.IsChecked = isChecked; }
+            finally { _isPopulatingControls = false; }
+        }
+
         /// <summary>Tray'den "Reload Config" sonrası arayüzü yeni config ile yeniden doldurur.</summary>
         public void ReloadFromConfig()
         {
@@ -454,7 +496,7 @@ namespace Warden
             // Save logic
             Action saveRule = () =>
             {
-                string newKey = ExtractExeName(cbExe.Text);
+                string newKey = ExeNameHelper.ExtractExeName(cbExe.Text);
 
                 var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
 
@@ -467,6 +509,15 @@ namespace Warden
                 _context.Config.Rules.TryGetValue(originalKey, out string? savedPresetId);
                 bool presetChanged = selectedPreset.Value != savedPresetId;
                 if (!keyChanged && !presetChanged) return;
+
+                // Başka bir kuralın exe'sine çevrilirse o kural sessizce eziliyordu → engelle ve satırı eski haline getir
+                if (keyChanged && _context.Config.Rules.ContainsKey(newKey))
+                {
+                    MessageBox.Show(Loc.Format("RuleExists", newKey), Loc.Get("Warning"),
+                                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                    Dispatcher.BeginInvoke(new Action(RenderRulesList));
+                    return;
+                }
 
                 if (keyChanged)
                 {
@@ -543,7 +594,7 @@ namespace Warden
 
             Action addRule = () =>
             {
-                string newKey = ExtractExeName(cbExe.Text);
+                string newKey = ExeNameHelper.ExtractExeName(cbExe.Text);
 
                 var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
 
@@ -569,18 +620,6 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         //  UI Event Handlers – Profiles Page
         // ══════════════════════════════════════════════════════════════
-
-        /// <summary>"Oyun Adı (oyun.exe)" biçimindeki görünen metinden exe adını çıkarır.</summary>
-        private static string ExtractExeName(string text)
-        {
-            string key = (text ?? "").Trim();
-            if (key.EndsWith(")") && key.Contains('('))
-            {
-                int start = key.LastIndexOf('(');
-                key = key.Substring(start + 1, key.Length - start - 2).Trim();
-            }
-            return key;
-        }
 
         private void CbDefaultPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -887,6 +926,10 @@ namespace Warden
 
         public void UpdateGpuData(GpuData data)
         {
+            // Pencere tepsideyken (çoğu zaman) görünmeyen metinleri 2 sn'de bir güncelleme; gösterilince son veri basılır
+            _lastGpuData = data;
+            if (!IsVisible) return;
+
             txtGpuClock.Text = Math.Round(data.CoreClockMhz).ToString();
             txtGpuTemp.Text = data.TemperatureCelsius.ToString();
             txtGpuUsage.Text = data.UsagePercentage.ToString();
@@ -967,6 +1010,7 @@ namespace Warden
             lblLiveGraphTitle.Text      = Loc.Get("LiveGraphTitle");
             txtNoGraphHint.Text         = Loc.Get("NoGraphSensorsHint");
             lblGraphNow.Text            = Loc.Get("GraphNow");
+            runPawnIoHint.Text          = Loc.Get("PawnIoMissing") + " ";
 
             foreach (ComboBoxItem item in cbTargetProfile.Items)
                 item.Content = Loc.Format("ProfileN", item.Tag);
@@ -984,9 +1028,27 @@ namespace Warden
             if (!_telemetryInitialized)
             {
                 _telemetryInitialized = true;
+                pnlPawnIoHint.Visibility = HardwareMonitorService.IsPawnIoInstalled ? Visibility.Collapsed : Visibility.Visible;
                 _hardwareMonitor.Initialize(_context.Config.TelemetryFavorites, _context.Config.TelemetryGraphSensors);
             }
             _hardwareMonitor.Start(1000);
+        }
+
+        private void LnkPawnIo_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+        {
+            // Warden yönetici olarak çalışır; tarayıcıyı doğrudan başlatmak onu da yönetici yapar.
+            // explorer.exe isteği mevcut (yükseltilmemiş) kabuğa devreder.
+            try
+            {
+                using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{e.Uri.AbsoluteUri}\"",
+                    UseShellExecute = false
+                });
+            }
+            catch { }
+            e.Handled = true;
         }
 
         private void StopTelemetry()
@@ -1124,20 +1186,52 @@ namespace Warden
             }
         }
 
+        // Grafik legend'ı ve çizgileri her saniye sıfırdan kurulmaz: sensör kümesi değişmedikçe mevcut
+        // kontroller güncellenir. Eskiden ✕ butonu her tick'te yok edilip yeniden oluşturulduğu için
+        // tıklama, yenilemeye denk gelince boşa gidiyordu.
+        private readonly Dictionary<string, (TextBlock Text, System.Windows.Shapes.Rectangle Dot)> _legendControls = new();
+        private readonly Dictionary<string, (System.Windows.Shapes.Polyline Line, System.Windows.Shapes.Ellipse Dot)> _chartShapes = new();
+        private string _lastLegendKey = "";
+
         private void RenderGraph(List<TelemetrySensorItem> graphSensors)
         {
-            wpGraphLegend.Children.Clear();
-
             if (graphSensors.Count == 0)
             {
                 txtNoGraphHint.Visibility = Visibility.Visible;
+                wpGraphLegend.Children.Clear();
                 cvsChart.Children.Clear();
+                _legendControls.Clear();
+                _chartShapes.Clear();
+                _lastLegendKey = "";
                 return;
             }
 
             txtNoGraphHint.Visibility = Visibility.Collapsed;
 
-            // Legend badges
+            string key = string.Join(",", graphSensors.Select(s => s.Id));
+            if (key != _lastLegendKey || _legendControls.Count != graphSensors.Count)
+            {
+                _lastLegendKey = key;
+                RebuildLegend(graphSensors);
+            }
+            else
+            {
+                foreach (var s in graphSensors)
+                {
+                    if (!_legendControls.TryGetValue(s.Id, out var c)) continue;
+                    c.Text.Text = $"{s.Name}: {s.FormattedValue}";
+                    c.Dot.Fill = BrushFrom(s.GraphColor);
+                }
+            }
+
+            DrawChartLines(graphSensors);
+        }
+
+        private void RebuildLegend(List<TelemetrySensorItem> graphSensors)
+        {
+            wpGraphLegend.Children.Clear();
+            _legendControls.Clear();
+
             foreach (var s in graphSensors)
             {
                 var badge = new Border
@@ -1197,9 +1291,8 @@ namespace Warden
 
                 badge.Child = sp;
                 wpGraphLegend.Children.Add(badge);
+                _legendControls[s.Id] = (txt, colorDot);
             }
-
-            DrawChartLines(graphSensors);
         }
 
         private void DrawChartLines(List<TelemetrySensorItem> graphSensors)
@@ -1208,32 +1301,61 @@ namespace Warden
             double height = cvsChart.ActualHeight;
             if (width <= 20 || height <= 20) return;
 
-            cvsChart.Children.Clear();
+            // Grafikten çıkarılan sensörlerin şekillerini kaldır
+            var activeIds = new HashSet<string>(graphSensors.Select(s => s.Id));
+            foreach (var staleId in _chartShapes.Keys.Where(id => !activeIds.Contains(id)).ToList())
+            {
+                cvsChart.Children.Remove(_chartShapes[staleId].Line);
+                cvsChart.Children.Remove(_chartShapes[staleId].Dot);
+                _chartShapes.Remove(staleId);
+            }
 
-            // Find min/max for scaling
-            float minVal = 0f;
-            float maxVal = 100f;
+            // Her birim (°C, MHz, W, % ...) kendi ölçeğinde çizilir. Eskiden tek ortak eksen vardı:
+            // grafiğe 4500 MHz eklenince 60 °C'lik sıcaklık çizgisi tabana yapışıyordu.
+            var unitRange = new Dictionary<string, float>(StringComparer.Ordinal);
             foreach (var s in graphSensors)
             {
+                // Yüzde ve sıcaklık için en az 0-100 aralığı: küçük dalgalanmalar abartılı görünmesin
+                float max = s.Unit is "%" or "°C" ? 100f : 1f;
                 foreach (var v in s.History)
                 {
-                    if (v > maxVal) maxVal = v;
+                    if (v > max) max = v;
                 }
+                unitRange[s.Unit] = unitRange.TryGetValue(s.Unit, out float existing) ? Math.Max(existing, max) : max;
             }
-            maxVal = (float)Math.Ceiling(maxVal * 1.1f / 10f) * 10f;
+            foreach (var unit in unitRange.Keys.ToList())
+            {
+                float max = unitRange[unit] * 1.1f;
+                float step = max > 1000 ? 100f : max > 100 ? 10f : 1f;
+                unitRange[unit] = Math.Max(1f, (float)Math.Ceiling(max / step) * step);
+            }
 
-            float range = maxVal - minVal;
-            if (range <= 0.01f) range = 1f;
+            const float minVal = 0f;
+            double stepX = width / 59.0;
 
             foreach (var s in graphSensors)
             {
-                if (s.History.Count < 2) continue;
+                if (!_chartShapes.TryGetValue(s.Id, out var shapes))
+                {
+                    shapes = (
+                        new System.Windows.Shapes.Polyline { StrokeThickness = 2.0, StrokeLineJoin = PenLineJoin.Round },
+                        new System.Windows.Shapes.Ellipse { Width = 6, Height = 6 });
+                    cvsChart.Children.Add(shapes.Line);
+                    cvsChart.Children.Add(shapes.Dot);
+                    _chartShapes[s.Id] = shapes;
+                }
 
-                var strokeBrush = BrushFrom(s.GraphColor);
-                var points = new PointCollection();
                 int count = s.History.Count;
-                double stepX = width / 59.0;
+                if (count < 2)
+                {
+                    shapes.Line.Visibility = Visibility.Collapsed;
+                    shapes.Dot.Visibility = Visibility.Collapsed;
+                    continue;
+                }
 
+                float range = unitRange[s.Unit] - minVal;
+                var strokeBrush = BrushFrom(s.GraphColor);
+                var points = new PointCollection(count);
                 Point lastPoint = new Point();
                 for (int i = 0; i < count; i++)
                 {
@@ -1243,29 +1365,19 @@ namespace Warden
                     if (y < 4) y = 4;
                     if (y > height - 4) y = height - 4;
 
-                    var pt = new Point(x, y);
-                    points.Add(pt);
-                    if (i == count - 1) lastPoint = pt;
+                    lastPoint = new Point(x, y);
+                    points.Add(lastPoint);
                 }
+                points.Freeze();
 
-                var polyline = new System.Windows.Shapes.Polyline
-                {
-                    Points = points,
-                    Stroke = strokeBrush,
-                    StrokeThickness = 2.0,
-                    StrokeLineJoin = PenLineJoin.Round
-                };
-                cvsChart.Children.Add(polyline);
+                shapes.Line.Points = points;
+                shapes.Line.Stroke = strokeBrush;
+                shapes.Line.Visibility = Visibility.Visible;
 
-                var dot = new System.Windows.Shapes.Ellipse
-                {
-                    Width = 6,
-                    Height = 6,
-                    Fill = strokeBrush
-                };
-                Canvas.SetLeft(dot, lastPoint.X - 3);
-                Canvas.SetTop(dot, lastPoint.Y - 3);
-                cvsChart.Children.Add(dot);
+                shapes.Dot.Fill = strokeBrush;
+                shapes.Dot.Visibility = Visibility.Visible;
+                Canvas.SetLeft(shapes.Dot, lastPoint.X - 3);
+                Canvas.SetTop(shapes.Dot, lastPoint.Y - 3);
             }
         }
 

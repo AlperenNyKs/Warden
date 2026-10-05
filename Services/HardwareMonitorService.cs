@@ -70,7 +70,11 @@ namespace Warden
     {
         private Computer? _computer;
         private System.Threading.Timer? _timer;
+        // _lock: sensör sözlüğü ve favori/grafik kümeleri (UI thread'i de alır → kısa tutulur)
+        // _hwLock: LibreHardwareMonitor donanım erişimi (Update/Close; yüzlerce ms sürebilir)
+        // Kilit sırası her zaman _hwLock → _lock
         private readonly object _lock = new();
+        private readonly object _hwLock = new();
         private int _isUpdating = 0;
         private bool _isInitialized = false;
 
@@ -91,6 +95,20 @@ namespace Warden
         };
 
         public event EventHandler<TelemetrySnapshot>? TelemetryUpdated;
+
+        /// <summary>
+        /// LibreHardwareMonitor 0.9.6+ eski WinRing0 yerine PawnIO sürücüsünü kullanır (WinRing0'ı Defender
+        /// "vulnerable driver" olarak engelliyor). PawnIO kurulu değilse CPU sıcaklık/saat/güç gibi MSR
+        /// tabanlı sensörler boş gelir; arayüz bunu kullanıcıya göstermek için bu bilgiyi kullanır.
+        /// </summary>
+        public static bool IsPawnIoInstalled
+        {
+            get
+            {
+                try { return LibreHardwareMonitor.PawnIo.PawnIo.IsInstalled; }
+                catch { return false; }
+            }
+        }
 
         private static readonly object LogLock = new();
 
@@ -155,6 +173,7 @@ namespace Warden
                                 IsStorageEnabled = false
                             };
                             comp.Open();
+                            lock (_hwLock)
                             lock (_lock)
                             {
                                 if (_disposed)
@@ -291,9 +310,16 @@ namespace Warden
 
         private void UpdateSensorsInternal()
         {
-            lock (_lock)
+            // Donanım okuması yalnızca _hwLock altında yapılır; UI'nin beklediği _lock bu sırada serbesttir.
+            // Eskiden tüm hw.Update() çağrıları _lock altındaydı ve ★/📈 tıklamaları UI'yi dondurabiliyordu.
+            lock (_hwLock)
             {
-                if (_computer == null || !_isInitialized || _disposed) return;
+                Computer? computer;
+                lock (_lock)
+                {
+                    if (_computer == null || !_isInitialized || _disposed) return;
+                    computer = _computer;
+                }
 
                 try
                 {
@@ -301,7 +327,7 @@ namespace Warden
                     {
                         _loggedFirstRun = true;
                         LogTelemetry("=== Initial Hardware & Sensors Discovery ===");
-                        foreach (var hw in _computer.Hardware)
+                        foreach (var hw in computer.Hardware)
                         {
                             LogTelemetry($"Hardware: '{hw.Name}' [{hw.HardwareType}]");
                             hw.Update();
@@ -322,30 +348,39 @@ namespace Warden
                         LogTelemetry("=============================================");
                     }
 
-                    foreach (var hardware in _computer.Hardware)
+                    // 1. Yavaş kısım: donanımdan oku (yalnızca _hwLock)
+                    foreach (var hardware in computer.Hardware)
                     {
                         hardware.Update();
-                        ProcessHardwareSensors(hardware, hardware.Name);
-
                         foreach (var sub in hardware.SubHardware)
-                        {
                             sub.Update();
-                            ProcessHardwareSensors(sub, $"{hardware.Name} - {sub.Name}");
-                        }
                     }
 
-                    // Eğer kullanıcının kayıtlı grafik sensörü yoksa, ilk seferde CPU ve GPU sıcaklıklarını varsayılan yap
-                    if (_applyDefaultGraph && _graphIds.Count == 0 && _sensors.Count > 0)
+                    // 2. Hızlı kısım: okunan değerleri sözlüğe işle (kısa süreli _lock)
+                    lock (_lock)
                     {
-                        var defaultCpu = _sensors.Values.FirstOrDefault(s => s.Category == "CPU" && s.SensorType == SensorType.Temperature);
-                        var defaultGpu = _sensors.Values.FirstOrDefault(s => s.Category == "GPU" && s.SensorType == SensorType.Temperature);
+                        if (_disposed) return;
 
-                        if (defaultCpu != null) { _graphIds.Add(defaultCpu.Id); defaultCpu.IsOnGraph = true; }
-                        if (defaultGpu != null) { _graphIds.Add(defaultGpu.Id); defaultGpu.IsOnGraph = true; }
-                        _applyDefaultGraph = false;
+                        foreach (var hardware in computer.Hardware)
+                        {
+                            ProcessHardwareSensors(hardware, hardware.Name);
+                            foreach (var sub in hardware.SubHardware)
+                                ProcessHardwareSensors(sub, $"{hardware.Name} - {sub.Name}");
+                        }
+
+                        // Eğer kullanıcının kayıtlı grafik sensörü yoksa, ilk seferde CPU ve GPU sıcaklıklarını varsayılan yap
+                        if (_applyDefaultGraph && _graphIds.Count == 0 && _sensors.Count > 0)
+                        {
+                            var defaultCpu = _sensors.Values.FirstOrDefault(s => s.Category == "CPU" && s.SensorType == SensorType.Temperature);
+                            var defaultGpu = _sensors.Values.FirstOrDefault(s => s.Category == "GPU" && s.SensorType == SensorType.Temperature);
+
+                            if (defaultCpu != null) { _graphIds.Add(defaultCpu.Id); defaultCpu.IsOnGraph = true; }
+                            if (defaultGpu != null) { _graphIds.Add(defaultGpu.Id); defaultGpu.IsOnGraph = true; }
+                            _applyDefaultGraph = false;
+                        }
+
+                        AssignGraphColors();
                     }
-
-                    AssignGraphColors();
                 }
                 catch (Exception ex)
                 {
@@ -732,17 +767,22 @@ namespace Warden
         public void Dispose()
         {
             Stop();
-            lock (_lock)
+            // Kilit altında kapatılır: devam eden bir tick'in kapatılmış Computer'a erişmesi önlenir
+            lock (_hwLock)
             {
-                // Kilit altında kapatılır: devam eden bir tick'in kapatılmış Computer'a erişmesi önlenir
-                _disposed = true;
+                Computer? computer;
+                lock (_lock)
+                {
+                    _disposed = true;
+                    computer = _computer;
+                    _computer = null;
+                    _isInitialized = false;
+                }
                 try
                 {
-                    _computer?.Close();
+                    computer?.Close();
                 }
                 catch { }
-                _computer = null;
-                _isInitialized = false;
             }
         }
     }

@@ -32,6 +32,11 @@ namespace Warden
         private GpuMonitor? _gpuMonitor;
         private readonly AfterburnerService _afterburner = new();
         private DateTime _lastGpuProfileApplied = DateTime.MinValue;
+        private bool _gpuProfileApplied;          // Profil uygulandı (ve hedef/profil ayarı değişmedi)
+        private bool _gpuDroppedBelowLimit;       // Uygulamadan sonra saat sınırın altına indi mi
+        private bool _gpuIneffectiveLogged;       // "Profil işe yaramadı" logu bir kez yazılır
+        private bool _afterburnerMissingLogged;   // "Afterburner yok" logu bir kez yazılır
+        private (double TargetMhz, int TargetProfile) _gpuAppliedFor;
 
         // Akıllı ReloadConfig: interval değişmediğinde watcher'ı yeniden başlatmamak için
         private int _lastIntervalMs = 0;
@@ -485,6 +490,16 @@ namespace Warden
                     // Eski Registry kaydını temizle
                     DeleteRunKeyValue(taskName);
 
+                    // Exe klasörü standart kullanıcılarca yazılabiliyorsa yönetici yetkili görev bir yetki yükseltme
+                    // kapısıdır (exe/DLL değiştirilip sonraki oturumda admin olarak çalıştırılabilir) → kaydetme, varsa kaldır.
+                    if (InstallLocationGuard.IsWritableByNonAdmins(exePath, out string reason))
+                    {
+                        RunSchtasks($"/delete /tn \"{taskName}\" /f");
+                        Log($"Startup task NOT registered (insecure install location): {reason}");
+                        _app.Dispatcher.BeginInvoke(new Action(() => OnInsecureStartupLocation(exePath, reason)));
+                        return;
+                    }
+
                     // /tr değeri içinde exe yolu her zaman tırnaklanır (iç tırnaklar \" ile kaçırılır)
                     // /it  = yalnızca oturum açık kullanıcı için çalış
                     // /rl highest = en yüksek yetkiyle başlat (UAC bypass)
@@ -503,6 +518,20 @@ namespace Warden
             {
                 Log($"SetStartup error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Güvensiz kurulum konumunda "Windows ile başlat" kapatılır ve kullanıcıya nedeni anlatılır (UI thread).
+        /// </summary>
+        private void OnInsecureStartupLocation(string exePath, string reason)
+        {
+            Config.StartWithWindows = false;
+            SaveConfig();
+            _mainWindow?.SetStartupChecked(false);
+
+            string folder = Path.GetDirectoryName(exePath) ?? exePath;
+            MessageBox.Show(Loc.Format("StartupInsecureBody", folder, reason),
+                            Loc.Get("StartupInsecureTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         private async Task DiscoverFromTray()
@@ -593,23 +622,56 @@ namespace Warden
             // Hedef MHz 0 (veya altı) ise otomatik profil devre dışı kabul edilir
             if (Config.TargetMhz <= 0) return;
 
-            // Check thresholds
-            if (data.CoreClockMhz > Config.TargetMhz &&
-                (DateTime.UtcNow - _lastGpuProfileApplied).TotalSeconds > Config.CooldownSeconds)
+            // Kullanıcı hedefi veya profili değiştirdiyse önceki uygulama durumu geçersizdir
+            var settings = (Config.TargetMhz, Config.TargetProfile);
+            if (settings != _gpuAppliedFor)
             {
-                // Bekleme süresi, başarısız denemede de başlatılır (Afterburner yoksa her 2 sn'de deneme yapılmaz)
-                _lastGpuProfileApplied = DateTime.UtcNow;
+                _gpuAppliedFor = settings;
+                _gpuProfileApplied = false;
+                _gpuIneffectiveLogged = false;
+            }
 
-                if (_afterburner.ApplyProfile(Config.TargetProfile))
+            if (data.CoreClockMhz <= Config.TargetMhz)
+            {
+                // Profil uygulandıktan sonra saat sınırın altına indi → profil işe yarıyor
+                if (_gpuProfileApplied) _gpuDroppedBelowLimit = true;
+                return;
+            }
+
+            // Saat sınırın üstünde.
+            // Profil uygulandı ama saat hiç sınırın altına inmediyse aynı profili tekrar uygulamak işe yaramaz;
+            // eskiden her bekleme süresinde Afterburner yeniden başlatılıp bildirim gösteriliyordu.
+            if (_gpuProfileApplied && !_gpuDroppedBelowLimit)
+            {
+                if (!_gpuIneffectiveLogged)
                 {
-                    string msg = Loc.Format("GpuProfileApplied", Math.Round(data.CoreClockMhz), Config.TargetProfile);
-                    Log($"[GPU Monitor] {msg}");
-                    ShowBalloon(2000, msg, ToolTipIcon.Warning);
+                    _gpuIneffectiveLogged = true;
+                    Log($"[GPU Monitor] Profile {Config.TargetProfile} applied but clock is still {Math.Round(data.CoreClockMhz)} MHz > {Config.TargetMhz} MHz. Not re-applying.");
                 }
-                else
-                {
-                    Log($"[GPU Monitor] Clock {Math.Round(data.CoreClockMhz)} MHz > limit, but MSI Afterburner is not installed or could not be started.");
-                }
+                return;
+            }
+
+            // Buraya gelindiyse ya hiç uygulanmadı ya da saat düştükten sonra tekrar yükseldi (profil geri alınmış)
+            if ((DateTime.UtcNow - _lastGpuProfileApplied).TotalSeconds <= Config.CooldownSeconds) return;
+
+            // Bekleme süresi, başarısız denemede de başlatılır (Afterburner yoksa her 2 sn'de deneme yapılmaz)
+            _lastGpuProfileApplied = DateTime.UtcNow;
+
+            if (_afterburner.ApplyProfile(Config.TargetProfile))
+            {
+                _gpuProfileApplied = true;
+                _gpuDroppedBelowLimit = false;
+                _gpuIneffectiveLogged = false;
+                _afterburnerMissingLogged = false;
+
+                string msg = Loc.Format("GpuProfileApplied", Math.Round(data.CoreClockMhz), Config.TargetProfile);
+                Log($"[GPU Monitor] {msg}");
+                ShowBalloon(2000, msg, ToolTipIcon.Warning);
+            }
+            else if (!_afterburnerMissingLogged)
+            {
+                _afterburnerMissingLogged = true;
+                Log($"[GPU Monitor] Clock {Math.Round(data.CoreClockMhz)} MHz > limit, but MSI Afterburner is not installed or could not be started.");
             }
         }
 

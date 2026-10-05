@@ -96,6 +96,8 @@ namespace Warden
 
         public void Start()
         {
+            _client.SonarRestarted -= OnSonarRestarted;
+            _client.SonarRestarted += OnSonarRestarted;
             _timer?.Dispose();
             _timer = new System.Threading.Timer(async _ => await TickAsync(), null, 0,
                 Math.Max(AppConfig.MinCheckIntervalMs, _intervalMs));
@@ -104,6 +106,8 @@ namespace Warden
 
         public void Stop()
         {
+            // Watcher interval değişince yeniden oluşturulur; abonelik kalırsa eski watcher bellekte tutulur
+            _client.SonarRestarted -= OnSonarRestarted;
             _timer?.Dispose();
             _timer = null;
             _onLog("Watcher stopped.");
@@ -124,6 +128,11 @@ namespace Warden
             _onLog("Config hot-reloaded (watcher devam ediyor).");
         }
 
+        // Sonar yeniden başlayınca aktif preset sıfırlanabilir; "zaten uygulandı" durumu geçersizdir
+        private int _forceReapply = 0;
+
+        private void OnSonarRestarted() => Interlocked.Exchange(ref _forceReapply, 1);
+
         // ── Tick ─────────────────────────────────────────────────────────
 
         private async Task TickAsync()
@@ -133,6 +142,13 @@ namespace Warden
 
             try
             {
+                if (Interlocked.Exchange(ref _forceReapply, 0) == 1 && _currentPresetId != null)
+                {
+                    _onLog("Sonar restart detected → active preset will be re-applied.");
+                    _currentPresetId = null;
+                    _presetNameCache.Clear();
+                }
+
                 IntPtr hwnd = GetForegroundWindow();
                 if (hwnd == IntPtr.Zero) return;
 

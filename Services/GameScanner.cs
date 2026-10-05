@@ -55,7 +55,9 @@ namespace Warden
                 if (string.IsNullOrEmpty(steamPath)) return results;
 
                 // Read libraryfolders.vdf to get all library paths
-                var libFolders = new List<string> { Path.Combine(steamPath, "steamapps") };
+                // Registry'deki SteamPath "c:/program files (x86)/steam" gibi '/' ile yazılır, vdf'deki yollar '\' ile.
+                // Normalize edilmezse ana kütüphane listeye iki kez girip iki kez taranıyordu.
+                var libFolders = new List<string> { NormalizeDir(Path.Combine(steamPath, "steamapps")) };
                 string vdfPath = Path.Combine(steamPath, "config", "libraryfolders.vdf");
                 if (!File.Exists(vdfPath))
                     vdfPath = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
@@ -73,7 +75,7 @@ namespace Warden
                             if (parts.Length >= 4)
                             {
                                 string p = parts[3].Replace("\\\\", "\\");
-                                string steamapps = Path.Combine(p, "steamapps");
+                                string steamapps = NormalizeDir(Path.Combine(p, "steamapps"));
                                 if (Directory.Exists(steamapps) && !libFolders.Contains(steamapps, StringComparer.OrdinalIgnoreCase))
                                     libFolders.Add(steamapps);
                             }
@@ -444,6 +446,18 @@ namespace Warden
             catch { return null; }
         }
 
+        private static string NormalizeDir(string path)
+        {
+            try
+            {
+                return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            }
+            catch
+            {
+                return path;
+            }
+        }
+
         private static long SafeLength(string file)
         {
             try { return new FileInfo(file).Length; }
@@ -534,7 +548,7 @@ namespace Warden
         private static readonly System.Text.RegularExpressions.Regex TokenRegex =
             new(@"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", System.Text.RegularExpressions.RegexOptions.Compiled);
 
-        private static bool IsSystemExe(string exeName)
+        internal static bool IsSystemExe(string exeName)
         {
             string baseName = Path.GetFileNameWithoutExtension(exeName);
             string lower = baseName.ToLowerInvariant();

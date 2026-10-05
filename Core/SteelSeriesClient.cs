@@ -76,7 +76,10 @@ namespace Warden
             Task.Delay(2000, token).ContinueWith(t =>
             {
                 if (!t.IsCanceled)
+                {
                     ResetAddress();
+                    RaiseSonarRestarted();
+                }
             }, TaskContinuationOptions.None);
         }
 
@@ -105,6 +108,21 @@ namespace Warden
             _sonarAddress = null;
         }
 
+        /// <summary>
+        /// GG/Sonar yeniden başlatıldığında tetiklenir (coreProps.json yeniden yazıldı veya Sonar farklı bir
+        /// adreste bulundu). Sonar yeniden başlayınca aktif preset'i sıfırlayabilir; dinleyiciler preset'i
+        /// tekrar uygulamalıdır. Olay arka plan thread'inden gelebilir.
+        /// </summary>
+        public event Action? SonarRestarted;
+
+        // Son başarılı çözümlenen adres (ResetAddress ile silinmez) → port değişimini fark etmek için
+        private string? _lastResolvedAddress;
+
+        private void RaiseSonarRestarted()
+        {
+            try { SonarRestarted?.Invoke(); } catch { }
+        }
+
         // ── Address Resolution (Retry + Exponential Backoff) ─────────────
 
         public async Task<string> GetSonarAddressAsync()
@@ -131,6 +149,12 @@ namespace Warden
                     // çağırırsa alan null olabiliyordu.
                     string address = await ReadSonarAddressAsync();
                     _sonarAddress = address;
+
+                    // coreProps izleyicisi yoksa (GG Warden'dan sonra kuruldu vb.) yeniden başlatma port değişiminden anlaşılır
+                    string? previous = Interlocked.Exchange(ref _lastResolvedAddress, address);
+                    if (previous != null && !string.Equals(previous, address, StringComparison.OrdinalIgnoreCase))
+                        RaiseSonarRestarted();
+
                     return address;
                 }
                 catch (Exception ex)

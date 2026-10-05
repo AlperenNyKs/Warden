@@ -24,6 +24,9 @@ jobs:
       - name: Build (Release)
         run: dotnet build -c Release --no-restore -warnaserror
 
+      - name: Test
+        run: dotnet test Tests/Warden.Tests/Warden.Tests.csproj -c Release --logger "console;verbosity=normal"
+
       - name: Publish
         run: dotnet publish -c Release --no-build -o publish
 

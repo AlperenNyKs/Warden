@@ -12,6 +12,11 @@ namespace Warden
         [DllImport("kernel32.dll")]
         private static extern bool AttachConsole(int dwProcessId);
 
+        private static readonly System.Security.Principal.SecurityIdentifier AdminsSid =
+            new(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+        private static readonly System.Security.Principal.SecurityIdentifier EveryoneSid =
+            new(System.Security.Principal.WellKnownSidType.WorldSid, null);
+
         private TrayApplicationContext? _trayContext;
         private static Mutex? _instanceMutex;
         private static EventWaitHandle? _wakeEvent;
@@ -42,14 +47,26 @@ namespace Warden
             bool createdNew;
             try
             {
-                var sid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null);
+                // En az yetki: yalnızca Administrators tam yetkili (ikinci kopya MutexAcl.Create ile tam erişim ister;
+                // uygulama requireAdministrator olduğundan her kopya yönetici). Everyone yalnızca bekleyebilir.
+                // Eskiden Everyone'a FullControl veriliyordu (ACL değiştirme/sahiplenme dahil).
                 var mSec = new System.Security.AccessControl.MutexSecurity();
-                mSec.AddAccessRule(new System.Security.AccessControl.MutexAccessRule(sid, System.Security.AccessControl.MutexRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+                mSec.AddAccessRule(new System.Security.AccessControl.MutexAccessRule(AdminsSid, System.Security.AccessControl.MutexRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+                mSec.AddAccessRule(new System.Security.AccessControl.MutexAccessRule(EveryoneSid, System.Security.AccessControl.MutexRights.Synchronize, System.Security.AccessControl.AccessControlType.Allow));
                 _instanceMutex = System.Threading.MutexAcl.Create(true, mutexName, out createdNew, mSec);
             }
             catch
             {
-                _instanceMutex = new Mutex(true, mutexName, out createdNew);
+                try
+                {
+                    _instanceMutex = new Mutex(true, mutexName, out createdNew);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Mutex var ama erişilemiyor → başka bir kopya çalışıyor demektir. Eskiden exception
+                    // OnStartup'tan kaçıyor, tepsi ikonu olmayan "zombi" bir süreç kalıyordu.
+                    createdNew = false;
+                }
             }
 
             if (!createdNew)
@@ -70,9 +87,12 @@ namespace Warden
             // Sinyal dinleyicisini başlat (Kullanıcı masaüstünden tekrar açınca pencere açılsın)
             try
             {
-                var sid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null);
+                // Uyandırma sinyali: başka kopyanın OpenExisting + Set yapabilmesi için Synchronize | Modify yeterli
                 var eSec = new System.Security.AccessControl.EventWaitHandleSecurity();
-                eSec.AddAccessRule(new System.Security.AccessControl.EventWaitHandleAccessRule(sid, System.Security.AccessControl.EventWaitHandleRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+                eSec.AddAccessRule(new System.Security.AccessControl.EventWaitHandleAccessRule(AdminsSid, System.Security.AccessControl.EventWaitHandleRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+                eSec.AddAccessRule(new System.Security.AccessControl.EventWaitHandleAccessRule(EveryoneSid,
+                    System.Security.AccessControl.EventWaitHandleRights.Synchronize | System.Security.AccessControl.EventWaitHandleRights.Modify,
+                    System.Security.AccessControl.AccessControlType.Allow));
                 _wakeEvent = System.Threading.EventWaitHandleAcl.Create(false, EventResetMode.AutoReset, eventName, out _, eSec);
             }
             catch
