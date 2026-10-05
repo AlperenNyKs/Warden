@@ -78,19 +78,29 @@ namespace Warden
                 else
                     StopTelemetry();
 
+                // Gizli pencerede sonsuz animasyon boşuna çalışmasın
+                if (_pulseAnimation != null)
+                {
+                    if (this.IsVisible) _pulseAnimation.Resume(ledStatus);
+                    else _pulseAnimation.Pause(ledStatus);
+                }
+
                 // GG açılışta kapalıysa preset listesi boş kalıyordu; pencere her açıldığında tekrar dene
                 if (this.IsVisible)
+                {
                     RefreshPresetsIfNeeded();
+                    if (_lastGpuData != null) UpdateGpuData(_lastGpuData);
+                }
             };
 
             LoadInitialConfig();
             _ = LoadSonarPresetsAsync();
 
-            // Status LED pulse animasyonunu başlat
+            // Status LED pulse animasyonunu başlat (kontrol edilebilir: pencere gizliyken duraklatılır)
             Loaded += (s, e) =>
             {
-                var sb = (System.Windows.Media.Animation.Storyboard)FindResource("PulseAnimation");
-                sb.Begin(ledStatus);
+                _pulseAnimation = (System.Windows.Media.Animation.Storyboard)FindResource("PulseAnimation");
+                _pulseAnimation.Begin(ledStatus, isControllable: true);
             };
         }
 
@@ -118,6 +128,8 @@ namespace Warden
             }
         }
         private bool _isSavingSize = false;
+        private System.Windows.Media.Animation.Storyboard? _pulseAnimation;
+        private GpuData? _lastGpuData;
 
         // ══════════════════════════════════════════════════════════════
         //  Window chrome
@@ -926,6 +938,10 @@ namespace Warden
 
         public void UpdateGpuData(GpuData data)
         {
+            // Pencere tepsideyken (çoğu zaman) görünmeyen metinleri 2 sn'de bir güncelleme; gösterilince son veri basılır
+            _lastGpuData = data;
+            if (!IsVisible) return;
+
             txtGpuClock.Text = Math.Round(data.CoreClockMhz).ToString();
             txtGpuTemp.Text = data.TemperatureCelsius.ToString();
             txtGpuUsage.Text = data.UsagePercentage.ToString();
