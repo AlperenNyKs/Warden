@@ -28,8 +28,16 @@ namespace Warden
         private readonly object _logLock = new();
         private readonly object _configFileLock = new();
         
+        // Donanım telemetrisi: tek örnek, tepsi sahiplenir (pencere kapalıyken de alarm / GPU profili / kayıt çalışır)
+        public HardwareMonitorService Telemetry { get; } = new();
+        public SessionRecorder Recorder { get; }
+        private readonly TempAlarmMonitor _tempAlarm = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10));
+        private readonly object _telemetryHandlerLock = new();
+        private readonly HashSet<string> _uiTelemetryDemand = new(StringComparer.Ordinal);
+        private bool _telemetryInitialized;
+        public TelemetrySnapshot? LastSnapshot { get; private set; }
+
         // GPU Monitor
-        private GpuMonitor? _gpuMonitor;
         private readonly AfterburnerService _afterburner = new();
         private DateTime _lastGpuProfileApplied = DateTime.MinValue;
         private bool _gpuProfileApplied;          // Profil uygulandı (ve hedef/profil ayarı değişmedi)
@@ -51,6 +59,9 @@ namespace Warden
         /// <summary>Son kontrol sonucu (ayarlar sayfası açılınca gösterilir).</summary>
         public UpdateCheckResult? LastUpdateResult { get; private set; }
         public UpdateInfo? PendingUpdate => _pendingUpdate;
+
+        /// <summary>Bulunan MSIAfterburner.exe yolu (yoksa null).</summary>
+        public string? AfterburnerPath => _afterburner.FindExecutable();
 
         // Akıllı ReloadConfig: interval değişmediğinde watcher'ı yeniden başlatmamak için
         private int _lastIntervalMs = 0;
@@ -77,6 +88,13 @@ namespace Warden
             _logPath = Path.Combine(_appDataFolder, "logs", "service.log");
 
             _client = new SteelSeriesClient();
+            Recorder = new SessionRecorder(Path.Combine(_appDataFolder, "sessions"));
+            Recorder.StateChanged += () =>
+            {
+                UpdateTelemetryDemand();
+                _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.UpdateRecordingState()));
+            };
+            Telemetry.TelemetryUpdated += OnTelemetryUpdated;
 
             _trayIcon = new NotifyIcon
             {
@@ -129,6 +147,15 @@ namespace Warden
                         _mainWindow = new MainWindow(this, _client);
                         _mainWindow.Closed += (s, e) => _mainWindow = null;
                     }
+
+                    // İlk açılış: neyin çalışıp neyin eksik olduğunu gösteren durum sayfasıyla aç
+                    if (!Config.FirstRunCompleted)
+                    {
+                        Config.FirstRunCompleted = true;
+                        SaveConfig();
+                        _mainWindow.ShowStatusPage();
+                        ShowMainWindow();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -180,6 +207,7 @@ namespace Warden
             Loc.CurrentLang = Config.Language;
             ApplyStartupIfChanged();
             ApplyUpdateSchedule();
+            UpdateTelemetryDemand();
 
             // Interval değiştiyse veya watcher hiç oluşturulmadıysa → watcher'ı yeniden oluştur
             if (_watcher == null || Config.CheckIntervalMilliseconds != _lastIntervalMs)
@@ -213,7 +241,8 @@ namespace Warden
                 OnActiveWindowChanged,
                 Log,
                 OnConnectionLost,
-                OnConnectionRestored
+                OnConnectionRestored,
+                OnGameSessionChanged
             );
             _watcher.Start();
             _lastIntervalMs = Config.CheckIntervalMilliseconds;
@@ -302,13 +331,8 @@ namespace Warden
 
                 StartWatcher();
 
-                // Start GPU Monitor
-                if (_gpuMonitor == null)
-                {
-                    _gpuMonitor = new GpuMonitor();
-                    _gpuMonitor.GpuDataUpdated += OnGpuDataUpdated;
-                    _gpuMonitor.Start();
-                }
+                // Donanım telemetrisi (GPU profili / sıcaklık alarmı açıksa arka planda çalışır)
+                UpdateTelemetryDemand(reinitialize: true);
 
                 // Cihazları otomatik devre dışı bırakma ve sürekli denetimi başlat
                 StartDeviceEnforcement();
@@ -764,11 +788,146 @@ namespace Warden
             }));
         }
 
-        private void OnGpuDataUpdated(object? sender, GpuData data)
-        {
-            // GpuMonitor DispatcherTimer kullanır → zaten UI thread'indeyiz
-            _mainWindow?.UpdateGpuData(data);
+        // ── Donanım telemetrisi ─────────────────────────────────────────
 
+        /// <summary>
+        /// Telemetrinin çalışıp çalışmayacağına ve hızına karar verir:
+        ///  - telemetri sayfası açık → 1 sn, tam tarama
+        ///  - kayıt sürüyor → 2 sn, tam tarama
+        ///  - GPU profili / sıcaklık alarmı / GPU veya durum sayfası → 2 sn, yalnızca CPU+GPU
+        ///  - hiçbiri → durur (LibreHardwareMonitor hiç başlatılmaz)
+        /// </summary>
+        public void UpdateTelemetryDemand(bool reinitialize = false)
+        {
+            bool uiTelemetry, anyUi;
+            lock (_uiTelemetryDemand)
+            {
+                uiTelemetry = _uiTelemetryDemand.Contains("ui-telemetry");
+                anyUi = _uiTelemetryDemand.Count > 0;
+            }
+            bool recording = Recorder.IsRecording;
+            bool background = Config.TargetMhz > 0 || Config.TempAlarmEnabled;
+
+            if (!(anyUi || recording || background))
+            {
+                Telemetry.Stop();
+                return;
+            }
+
+            if (!_telemetryInitialized || reinitialize)
+            {
+                _telemetryInitialized = true;
+                Telemetry.Initialize(Config.TelemetryFavorites, Config.TelemetryGraphSensors);
+            }
+
+            Telemetry.FullScan = uiTelemetry || recording;
+            Telemetry.Start(uiTelemetry ? 1000 : 2000);
+        }
+
+        /// <summary>Pencere sayfaları telemetri ihtiyacını bildirir (ör. "ui-telemetry", "ui-gpu", "ui-status").</summary>
+        public void SetUiTelemetryDemand(string key, bool active)
+        {
+            lock (_uiTelemetryDemand)
+            {
+                if (active) _uiTelemetryDemand.Add(key);
+                else _uiTelemetryDemand.Remove(key);
+            }
+            UpdateTelemetryDemand();
+        }
+
+        private void OnTelemetryUpdated(object? sender, TelemetrySnapshot snapshot)
+        {
+            // Hem zamanlayıcı thread'inden hem (★/📈 tıklamalarında) UI thread'inden gelebilir → sırala
+            lock (_telemetryHandlerLock)
+            {
+                LastSnapshot = snapshot;
+                try
+                {
+                    if (snapshot.PrimaryGpu != null) HandleGpuProfile(snapshot.PrimaryGpu);
+                    if (Config.TempAlarmEnabled) HandleTempAlarm(snapshot);
+                    if (Recorder.IsRecording) Recorder.Write(snapshot);
+                }
+                catch (Exception ex)
+                {
+                    Log($"[Telemetry] handler error: {ex.Message}");
+                }
+            }
+            _mainWindow?.UpdateGpuData(snapshot);
+        }
+
+        private void HandleTempAlarm(TelemetrySnapshot snapshot)
+        {
+            float? gpuTemp = snapshot.PrimaryGpu is { TemperatureCelsius: > 0 } g ? g.TemperatureCelsius : null;
+            var alerts = _tempAlarm.Evaluate(DateTime.UtcNow,
+                ("CPU", snapshot.CpuTemperature, (float)Config.CpuTempLimit),
+                ("GPU", gpuTemp, (float)Config.GpuTempLimit));
+
+            foreach (var a in alerts)
+            {
+                string msg = Loc.Format("TempAlarm", a.Source, Math.Round(a.Temperature), a.Limit);
+                Log($"[TempAlarm] {msg}");
+                ShowBalloon(8000, msg, ToolTipIcon.Warning);
+            }
+        }
+
+        // ── Oturum kaydı ────────────────────────────────────────────────
+
+        private void OnGameSessionChanged(string? game)
+        {
+            if (!Config.AutoRecordGameSessions) return;
+            try
+            {
+                if (game != null)
+                {
+                    // Elle başlatılmış kayda dokunma; otomatik kayıt aynı oyunsa devam etsin
+                    if (Recorder.IsRecording && (!Recorder.IsAutomatic ||
+                        string.Equals(Recorder.Label, game, StringComparison.OrdinalIgnoreCase)))
+                        return;
+                    string file = Recorder.Start(game, automatic: true);
+                    Log($"[Recorder] Auto recording started for {game}: {file}");
+                }
+                else if (Recorder.IsRecording && Recorder.IsAutomatic)
+                {
+                    Recorder.Stop();
+                    Log("[Recorder] Auto recording stopped (game closed).");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[Recorder] {ex.Message}");
+            }
+        }
+
+        public void StartManualRecording()
+        {
+            try
+            {
+                string file = Recorder.Start(Loc.Get("RecordManualLabel"), automatic: false);
+                Log($"[Recorder] Manual recording started: {file}");
+            }
+            catch (Exception ex)
+            {
+                Log($"[Recorder] {ex.Message}");
+                MessageBox.Show(ex.Message, "Warden", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        public void OpenSessionsFolder()
+        {
+            try
+            {
+                Directory.CreateDirectory(Recorder.Folder);
+                // Yönetici yetkisi Gezgin'e geçmesin diye explorer.exe ile açılır
+                using var _ = Process.Start(new ProcessStartInfo("explorer.exe", $"\"{Recorder.Folder}\"") { UseShellExecute = false });
+            }
+            catch (Exception ex)
+            {
+                Log($"[Recorder] open folder failed: {ex.Message}");
+            }
+        }
+
+        private void HandleGpuProfile(GpuData gpu)
+        {
             // Hedef MHz 0 (veya altı) ise otomatik profil devre dışı kabul edilir
             if (Config.TargetMhz <= 0) return;
 
@@ -781,7 +940,7 @@ namespace Warden
                 _gpuIneffectiveLogged = false;
             }
 
-            if (data.CoreClockMhz <= Config.TargetMhz)
+            if (gpu.CoreClockMhz <= Config.TargetMhz)
             {
                 // Profil uygulandıktan sonra saat sınırın altına indi → profil işe yarıyor
                 if (_gpuProfileApplied) _gpuDroppedBelowLimit = true;
@@ -796,7 +955,7 @@ namespace Warden
                 if (!_gpuIneffectiveLogged)
                 {
                     _gpuIneffectiveLogged = true;
-                    Log($"[GPU Monitor] Profile {Config.TargetProfile} applied but clock is still {Math.Round(data.CoreClockMhz)} MHz > {Config.TargetMhz} MHz. Not re-applying.");
+                    Log($"[GPU Monitor] Profile {Config.TargetProfile} applied but clock is still {Math.Round(gpu.CoreClockMhz)} MHz > {Config.TargetMhz} MHz. Not re-applying.");
                 }
                 return;
             }
@@ -814,14 +973,14 @@ namespace Warden
                 _gpuIneffectiveLogged = false;
                 _afterburnerMissingLogged = false;
 
-                string msg = Loc.Format("GpuProfileApplied", Math.Round(data.CoreClockMhz), Config.TargetProfile);
+                string msg = Loc.Format("GpuProfileApplied", Math.Round(gpu.CoreClockMhz), Config.TargetProfile);
                 Log($"[GPU Monitor] {msg}");
                 ShowBalloon(2000, msg, ToolTipIcon.Warning);
             }
             else if (!_afterburnerMissingLogged)
             {
                 _afterburnerMissingLogged = true;
-                Log($"[GPU Monitor] Clock {Math.Round(data.CoreClockMhz)} MHz > limit, but MSI Afterburner is not installed or could not be started.");
+                Log($"[GPU Monitor] Clock {Math.Round(gpu.CoreClockMhz)} MHz > limit, but MSI Afterburner is not installed or could not be started.");
             }
         }
 
@@ -888,7 +1047,8 @@ namespace Warden
             Safe(() => _deviceEnforceTimer?.Dispose());
             Safe(() => _updateTimer?.Dispose());
             Safe(() => _watcher?.Stop());
-            Safe(() => _gpuMonitor?.Stop());
+            Safe(() => Recorder.Dispose());
+            Safe(() => Telemetry.Dispose());
             Safe(() => _app.Dispatcher.Invoke(() =>
             {
                 if (_mainWindow != null)

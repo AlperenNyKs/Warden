@@ -30,6 +30,8 @@ namespace Warden
         private readonly Action<string> _onLog;
         private readonly Action? _onConnectionLost;
         private readonly Action? _onConnectionRestored;
+        private readonly Action<string?>? _onGameSessionChanged;   // oyun kuralı başladı (ad) / bitti (null)
+        private string? _reportedGame;
 
         // Timer
         private System.Threading.Timer? _timer;
@@ -81,7 +83,8 @@ namespace Warden
             Action<string> onActiveWindowChanged,
             Action<string> onLog,
             Action? onConnectionLost = null,
-            Action? onConnectionRestored = null)
+            Action? onConnectionRestored = null,
+            Action<string?>? onGameSessionChanged = null)
         {
             _client = client;
             _intervalMs = intervalMs;
@@ -92,6 +95,7 @@ namespace Warden
             _onLog = onLog;
             _onConnectionLost = onConnectionLost;
             _onConnectionRestored = onConnectionRestored;
+            _onGameSessionChanged = onGameSessionChanged;
         }
 
         public void Start()
@@ -230,6 +234,14 @@ namespace Warden
                         targetPresetId = defaultPresetId;
                         targetRuleName = "Desktop";
                     }
+                }
+
+                // Oyun oturumu takibi (GG bağlantısından bağımsız): CSV kaydı gibi özellikler kullanır
+                string? activeGame = targetRuleName == "Desktop" ? null : targetRuleName;
+                if (!string.Equals(activeGame, _reportedGame, StringComparison.OrdinalIgnoreCase))
+                {
+                    _reportedGame = activeGame;
+                    try { _onGameSessionChanged?.Invoke(activeGame); } catch { }
                 }
 
                 // 3. Gerekiyorsa preset'i değiştir
