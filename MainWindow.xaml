@@ -1372,6 +1372,91 @@
                                         </Grid>
                                     </Border>
 
+                                    <!-- ── Modüller ── -->
+                                    <TextBlock x:Name="lblModulesSection" Text="MODÜLLER"
+                                               Foreground="{StaticResource TxtSecond}"
+                                               FontSize="10" FontWeight="Bold" Margin="0,22,0,12"/>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblModuleSonar" Text="Sonar profil geçişi"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblModuleSonarDesc"
+                                                           Text=""
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkModuleSonar" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblModuleAudioDevices" Text="Ses cihazı denetleyicisi"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblModuleAudioDevicesDesc"
+                                                           Text=""
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkModuleAudioDevices" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblModuleHardware" Text="Donanım izleme"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblModuleHardwareDesc"
+                                                           Text=""
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkModuleHardware" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblModuleGpuProfile" Text="GPU / Afterburner profili"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblModuleGpuProfileDesc"
+                                                           Text=""
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkModuleGpuProfile" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
                                     <!-- ── Oyun taraması ── -->
                                     <TextBlock x:Name="lblGamesSection" Text="OYUNLAR"
                                                Foreground="{StaticResource TxtSecond}"
@@ -1666,6 +1751,26 @@
                                 </StackPanel>
                             </ScrollViewer>
                         </Grid>
+
+                        <!-- Kapalı modül: sayfa soluk ve tıklanamaz, üstünde "Modülü aç" kartı -->
+                        <Border x:Name="moduleOffOverlay" Visibility="Collapsed" Panel.ZIndex="10"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
+                                Background="{StaticResource BgInput}" BorderBrush="{StaticResource Border}"
+                                BorderThickness="1" CornerRadius="12" Padding="24,20">
+                            <StackPanel>
+                                <TextBlock x:Name="txtModuleOffTitle" Text="Bu modül kapalı"
+                                           Foreground="{StaticResource TxtPrimary}" FontSize="15" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"/>
+                                <TextBlock x:Name="txtModuleOffDesc" Text=""
+                                           Foreground="{StaticResource TxtSecond}" FontSize="12" TextWrapping="Wrap"
+                                           TextAlignment="Center" Margin="0,8,0,16"/>
+                                <Button x:Name="btnModuleEnable" Style="{StaticResource AccentButton}"
+                                        HorizontalAlignment="Center" Padding="18,8" Cursor="Hand"
+                                        Click="BtnModuleEnable_Click">
+                                    <TextBlock x:Name="lblModuleEnable" Text="Modülü aç"/>
+                                </Button>
+                            </StackPanel>
+                        </Border>
 
                     </Grid>
                 </Border>

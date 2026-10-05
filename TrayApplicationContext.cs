@@ -204,6 +204,7 @@ namespace Warden
             _menuOpen.Text     = Loc.Get("TrayOpenSettings");
             _menuReload.Text   = Loc.Get("TrayReloadConfig");
             _menuDiscover.Text = Loc.Get("TrayDiscoverPresets");
+            _menuDiscover.Visible = Config.ModuleSonar;   // Sonar kapalıyken GG'ye bağlanan menü öğesi yok
             _menuExit.Text     = Loc.Get("TrayExit");
             _menuUpdate.Visible = _pendingUpdate != null;
             if (_pendingUpdate != null)
@@ -220,6 +221,7 @@ namespace Warden
             Loc.CurrentLang = Config.Language;
             ApplyStartupIfChanged();
             ApplyUpdateSchedule();
+            ApplyModuleChanges();
             UpdateTelemetryDemand();
 
             // Interval değiştiyse veya watcher hiç oluşturulmadıysa → watcher'ı yeniden oluştur
@@ -233,6 +235,23 @@ namespace Warden
             // (Eskiden her ayar değişiminde schtasks.exe 3-4 kez senkron çalıştırılıyor ve
             //  cihaz denetim zamanlayıcısı sıfırlanıyordu; artık gerek yok.)
             _watcher.UpdateConfig(Config.DefaultPresetId, Config.Rules);
+            _watcher.SetSwitchingEnabled(Config.ModuleSonar);
+        }
+
+        /// <summary>
+        /// Kapatılan modülün arka plan işini durdurur, açılanı başlatır. Sonar (StartWatcher / hot-update) ve
+        /// telemetri (UpdateTelemetryDemand) kendi yerlerinde uygulanır.
+        /// </summary>
+        private void ApplyModuleChanges()
+        {
+            if (Config.ModuleAudioDevices != (_deviceEnforceTimer != null))
+                StartDeviceEnforcement();
+
+            if (!Config.ModuleHardware && Recorder.IsRecording)
+            {
+                Recorder.Stop();
+                Log("[Recorder] Recording stopped (hardware module off).");
+            }
         }
 
         /// <summary>Tray menüsündeki "Reload Config": config.json'ı diskten yeniden okur.</summary>
@@ -257,6 +276,7 @@ namespace Warden
                 OnConnectionRestored,
                 OnGameSessionChanged
             );
+            _watcher.SetSwitchingEnabled(Config.ModuleSonar);
             _watcher.Start();
             _lastIntervalMs = Config.CheckIntervalMilliseconds;
         }
@@ -428,6 +448,8 @@ namespace Warden
         private void StartDeviceEnforcement()
         {
             _deviceEnforceTimer?.Dispose();
+            _deviceEnforceTimer = null;
+            if (!Config.ModuleAudioDevices) return;
 
             // İlk çalıştırma gecikmeli (DeviceDisableDelaySeconds), ardından her 30 saniyede bir otomatik denetim
             int initialDelayMs = Math.Max(0, Config.DeviceDisableDelaySeconds) * 1000;
@@ -614,8 +636,11 @@ namespace Warden
                 var games = await Task.Run(GameScanner.ScanAllGames);
 
                 List<SonarConfig>? presets = null;
-                try { presets = await _client.GetConfigsAsync(); }
-                catch (Exception ex) { Log($"[Game scan] GG presets unavailable, skipping profile assignment: {ex.Message}"); }
+                if (Config.ModuleSonar)   // Sonar kapalıysa GG'ye istek yok; oyunlar yine listeye eklenir
+                {
+                    try { presets = await _client.GetConfigsAsync(); }
+                    catch (Exception ex) { Log($"[Game scan] GG presets unavailable, skipping profile assignment: {ex.Message}"); }
+                }
 
                 GameSyncResult result = null!;
                 await _app.Dispatcher.InvokeAsync(() =>
@@ -881,8 +906,20 @@ namespace Warden
                 uiTelemetry = _uiTelemetryDemand.Contains("ui-telemetry") || _uiTelemetryDemand.Contains("ui-overview");
                 anyUi = _uiTelemetryDemand.Count > 0;
             }
+            // Donanım izleme kapalı: LibreHardwareMonitor (ve çekirdek sürücüsü) hiç açık tutulmaz
+            if (!Config.ModuleHardware)
+            {
+                if (_telemetryInitialized)
+                {
+                    _telemetryInitialized = false;
+                    Telemetry.Release();
+                    LastSnapshot = null;   // Panel eski değerleri canlıymış gibi göstermesin
+                }
+                return;
+            }
+
             bool recording = Recorder.IsRecording;
-            bool background = Config.TargetMhz > 0 || Config.TempAlarmEnabled;
+            bool background = (Config.GpuProfileActive && Config.TargetMhz > 0) || Config.TempAlarmEnabled;
 
             if (!(anyUi || recording || background))
             {
@@ -919,7 +956,7 @@ namespace Warden
                 LastSnapshot = snapshot;
                 try
                 {
-                    if (snapshot.PrimaryGpu != null) HandleGpuProfile(snapshot.PrimaryGpu);
+                    if (Config.GpuProfileActive && snapshot.PrimaryGpu != null) HandleGpuProfile(snapshot.PrimaryGpu);
                     if (Config.TempAlarmEnabled) HandleTempAlarm(snapshot);
                     if (Recorder.IsRecording) Recorder.Write(snapshot);
                 }
@@ -958,7 +995,7 @@ namespace Warden
             ActiveGameSince = game != null ? DateTime.Now : null;
             _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.OnGameSessionChanged()));
 
-            if (!Config.AutoRecordGameSessions) return;
+            if (!Config.AutoRecordGameSessions || !Config.ModuleHardware) return;
             try
             {
                 if (game != null)
@@ -984,6 +1021,7 @@ namespace Warden
 
         public void StartManualRecording()
         {
+            if (!Config.ModuleHardware) return;
             try
             {
                 string file = Recorder.Start(Loc.Get("RecordManualLabel"), automatic: false);

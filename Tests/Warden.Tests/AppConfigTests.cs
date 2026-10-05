@@ -241,3 +241,39 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class ModuleConfigTests
+    {
+        [Fact]
+        public void LegacyConfigWithoutModuleFields_HasAllModulesOn()
+        {
+            var cfg = System.Text.Json.JsonSerializer.Deserialize<AppConfig>("{\"Rules\":{}}")!;
+            cfg.Normalize();
+
+            Assert.True(cfg.ModuleSonar);
+            Assert.True(cfg.ModuleAudioDevices);
+            Assert.True(cfg.ModuleHardware);
+            Assert.True(cfg.ModuleGpuProfile);
+        }
+
+        [Theory]
+        [InlineData(true, true, true)]
+        [InlineData(true, false, false)]   // GPU profili sensörlere bağlı
+        [InlineData(false, true, false)]
+        public void GpuProfileActive_RequiresHardwareModule(bool gpu, bool hardware, bool expected)
+        {
+            var cfg = new AppConfig { ModuleGpuProfile = gpu, ModuleHardware = hardware };
+            Assert.Equal(expected, cfg.GpuProfileActive);
+        }
+
+        [Fact]
+        public void ComputedGpuProfileActive_IsNotWrittenToConfigFile()
+        {
+            string json = System.Text.Json.JsonSerializer.Serialize(new AppConfig());
+            Assert.DoesNotContain("GpuProfileActive", json);
+            Assert.Contains("\"ModuleHardware\":true", json);
+        }
+    }
+}
