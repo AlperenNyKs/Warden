@@ -18,6 +18,9 @@ namespace Warden
         public List<string> DiscoveredGames { get; set; } = new();
         public Dictionary<string, string> DiscoveredGameNames { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+        // Oyun tarayıcısının bulduğu exe'ler (manuel eklenenler burada olmaz). null = alan eklenmeden önceki config.
+        public List<string>? ScannedGames { get; set; }
+
         // GPU Monitor
         public double TargetMhz { get; set; } = 1550;
         public int TargetProfile { get; set; } = 1;
@@ -73,6 +76,10 @@ namespace Warden
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            ScannedGames = ScannedGames?.Where(g => !string.IsNullOrWhiteSpace(g))
+                                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                                        .ToList();
+
             DisabledDevices ??= new();
             DisabledDeviceNames ??= new();
             TelemetryFavorites ??= new();
@@ -88,6 +95,35 @@ namespace Warden
             if (double.IsNaN(TargetMhz) || double.IsInfinity(TargetMhz) || TargetMhz < 0) TargetMhz = 0;
             CpuTempLimit = Math.Clamp(CpuTempLimit, MinTempLimit, MaxTempLimit);
             GpuTempLimit = Math.Clamp(GpuTempLimit, MinTempLimit, MaxTempLimit);
+        }
+
+        /// <summary>
+        /// Daha önce taramada bulunup bu taramada bulunamayan (kaldırılmış) oyunları listeden ve kurallardan siler,
+        /// ardından taranan oyun listesini günceller. Manuel eklenen oyunlara dokunulmaz. Silinen exe'leri döndürür.
+        /// </summary>
+        public List<string> PruneUninstalledGames(IEnumerable<string> foundExes)
+        {
+            var found = new HashSet<string>(foundExes, StringComparer.OrdinalIgnoreCase);
+
+            // Tarama hiçbir şey bulamadıysa (erişim hatası vb.) her şeyi silmek yerine hiçbir şeyi silme
+            if (found.Count == 0) return new List<string>();
+
+            // Eski config'ler kaynağı tutmuyordu: adı dolu kayıtları tarayıcı yazar, manuel/kural satırından
+            // eklenenlerin adı boştur.
+            var previous = ScannedGames ?? DiscoveredGames
+                .Where(e => DiscoveredGameNames.TryGetValue(e, out var n) && !string.IsNullOrEmpty(n))
+                .ToList();
+
+            var removed = previous.Where(e => !found.Contains(e)).ToList();
+            foreach (var exe in removed)
+            {
+                DiscoveredGames.RemoveAll(g => g.Equals(exe, StringComparison.OrdinalIgnoreCase));
+                DiscoveredGameNames.Remove(exe);
+                Rules.Remove(exe);
+            }
+
+            ScannedGames = found.ToList();
+            return removed;
         }
     }
 }

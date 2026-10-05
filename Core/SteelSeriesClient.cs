@@ -306,10 +306,12 @@ namespace Warden
                         id = AsString(uuidProp);
                     if (item.TryGetProperty("virtualAudioDevice", out var devProp))
                         device = AsString(devProp);
+                    bool isPreset = item.TryGetProperty("isPreset", out var presetProp) &&
+                                    presetProp.ValueKind == JsonValueKind.True;
 
                     if (string.IsNullOrEmpty(id)) continue;
 
-                    list.Add(new SonarConfig { id = id, name = name, virtualAudioDevice = device });
+                    list.Add(new SonarConfig { id = id, name = name, virtualAudioDevice = device, isPreset = isPreset });
                 }
             }
             return list;
@@ -343,5 +345,6 @@ namespace Warden
         public string id { get; set; } = "";
         public string name { get; set; } = "";
         public string virtualAudioDevice { get; set; } = "";
+        public bool isPreset { get; set; }   // GG'nin hazır (oyuna özel) preset'i; false = kullanıcının oluşturduğu
     }
 }

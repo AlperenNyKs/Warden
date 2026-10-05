@@ -44,7 +44,9 @@ dotnet run -c Release
 
 3. **Profilleri Ayarlama (Sonar):**
    - **"Yüklü Oyunları Tara"** butonuna basarak oyunları otomatik tespit edin.
-   - Her oyunun karşısındaki menüden SteelSeries Sonar profilini eşleştirin.
+   - SteelSeries GG'de oyuna özel bir profili olan oyunlara (ör. "Valorant Pro Preset", "War Thunder") o profil otomatik atanır. Var olan kurallarınız değiştirilmez.
+   - Bilgisayardan kaldırılan oyunlar bir sonraki taramada listeden ve kurallardan silinir. Elle eklediğiniz oyunlara dokunulmaz.
+   - Diğer oyunlar için karşısındaki menüden SteelSeries Sonar profilini eşleştirin.
 
 4. **Sistem Telemetrisi (Sensörler):**
    - CPU ve GPU sıcaklıkları, saat hızları, watt tüketimleri ve kullanım oranlarını canlı izleyin.

@@ -172,6 +172,8 @@ namespace Warden
                     { "ManualSuccess",          "Game added successfully!" },
                     { "ScanDone",               "{0} new games found" },
                     { "ScanNone",               "No new games found" },
+                    { "ScanMatched",            "{0} GG profiles assigned" },
+                    { "ScanRemoved",            "{0} uninstalled games removed" },
                     { "WarningSelectProcess",   "Please select or enter an executable name." },
                     { "WarningSelectPreset",    "Please select a target EQ preset." },
 
@@ -409,6 +411,8 @@ namespace Warden
                     { "ManualSuccess",          "Oyun başarıyla eklendi!" },
                     { "ScanDone",               "{0} yeni oyun bulundu" },
                     { "ScanNone",               "Yeni oyun bulunamadı" },
+                    { "ScanMatched",            "{0} GG profili atandı" },
+                    { "ScanRemoved",            "{0} kaldırılmış oyun silindi" },
                     { "WarningSelectProcess",   "Lütfen bir işlem adı seçin veya yazın." },
                     { "WarningSelectPreset",    "Lütfen bir hedef EQ profili seçin." },
 
