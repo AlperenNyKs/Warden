@@ -16,6 +16,16 @@
   - `logs\telemetry.log` → Donanım sensörleri ve telemetri logları
   - `logs\crash.log` → Olası hata kayıtları
 
+> ⚠️ **"Windows ile başlat" için korumalı klasör şart.** Warden oturum açılışında yönetici yetkisiyle başlatılır.
+> `D:\Warden\bin\...` gibi standart kullanıcının yazabildiği bir klasörden çalışıyorsa, herhangi bir program
+> `Warden.exe`'yi veya bir DLL'ini değiştirip yönetici yetkisi kazanabilir; bu yüzden Warden orada başlangıç görevi
+> oluşturmaz. Kalıcı kullanım için **yönetici** PowerShell'de yayınlayın:
+> ```powershell
+> cd D:\Warden
+> dotnet publish -c Release -o "C:\Program Files\Warden"
+> ```
+> Ardından `C:\Program Files\Warden\Warden.exe`'yi çalıştırıp ayarlardan "Windows ile başlat"ı açın.
+
 ---
 
 ## 🚀 2. Uygulamayı Nasıl Açarım?

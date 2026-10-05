@@ -485,6 +485,16 @@ namespace Warden
                     // Eski Registry kaydını temizle
                     DeleteRunKeyValue(taskName);
 
+                    // Exe klasörü standart kullanıcılarca yazılabiliyorsa yönetici yetkili görev bir yetki yükseltme
+                    // kapısıdır (exe/DLL değiştirilip sonraki oturumda admin olarak çalıştırılabilir) → kaydetme, varsa kaldır.
+                    if (InstallLocationGuard.IsWritableByNonAdmins(exePath, out string reason))
+                    {
+                        RunSchtasks($"/delete /tn \"{taskName}\" /f");
+                        Log($"Startup task NOT registered (insecure install location): {reason}");
+                        _app.Dispatcher.BeginInvoke(new Action(() => OnInsecureStartupLocation(exePath, reason)));
+                        return;
+                    }
+
                     // /tr değeri içinde exe yolu her zaman tırnaklanır (iç tırnaklar \" ile kaçırılır)
                     // /it  = yalnızca oturum açık kullanıcı için çalış
                     // /rl highest = en yüksek yetkiyle başlat (UAC bypass)
@@ -503,6 +513,20 @@ namespace Warden
             {
                 Log($"SetStartup error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Güvensiz kurulum konumunda "Windows ile başlat" kapatılır ve kullanıcıya nedeni anlatılır (UI thread).
+        /// </summary>
+        private void OnInsecureStartupLocation(string exePath, string reason)
+        {
+            Config.StartWithWindows = false;
+            SaveConfig();
+            _mainWindow?.SetStartupChecked(false);
+
+            string folder = Path.GetDirectoryName(exePath) ?? exePath;
+            MessageBox.Show(Loc.Format("StartupInsecureBody", folder, reason),
+                            Loc.Get("StartupInsecureTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         private async Task DiscoverFromTray()

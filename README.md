@@ -42,6 +42,14 @@ cd Warden
 dotnet build -c Release
 ```
 
+> **"Start with Windows" requires a protected install folder.** Warden is launched at logon with administrator
+> rights (Task Scheduler, `/rl highest`). If its folder is writable by standard users (e.g. `D:\Warden\bin\...`),
+> any program could swap `Warden.exe` or a DLL and get admin rights, so Warden refuses to register the task there.
+> Publish it to Program Files from an **elevated** terminal instead:
+> ```powershell
+> dotnet publish -c Release -o "C:\Program Files\Warden"
+> ```
+
 ---
 
 ## 💻 Technologies Used

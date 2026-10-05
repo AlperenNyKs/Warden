@@ -324,6 +324,14 @@ namespace Warden
             _ = LoadSonarPresetsAsync();
         }
 
+        /// <summary>"Windows ile başlat" kutusunu, kaydetme olaylarını tetiklemeden günceller.</summary>
+        public void SetStartupChecked(bool isChecked)
+        {
+            _isPopulatingControls = true;
+            try { chkStartup.IsChecked = isChecked; }
+            finally { _isPopulatingControls = false; }
+        }
+
         /// <summary>Tray'den "Reload Config" sonrası arayüzü yeni config ile yeniden doldurur.</summary>
         public void ReloadFromConfig()
         {
