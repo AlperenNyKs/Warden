@@ -22,6 +22,7 @@
     <Compile Remove="Tests\**" />
     <Page Remove="Tests\**" />
     <None Remove="Tests\**" />
+    <None Remove="licenses\**" />
     <EmbeddedResource Remove="Tests\**" />
     <InternalsVisibleTo Include="Warden.Tests" />
   </ItemGroup>

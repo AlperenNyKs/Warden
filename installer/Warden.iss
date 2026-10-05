@@ -65,6 +65,10 @@ Name: "pawnio"; Description: "{cm:InstallPawnIO}"; GroupDescription: "{cm:Driver
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Lisans yükümlülükleri: Warden + dağıtılan üçüncü taraf kütüphanelerin lisans metinleri
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Warden"; Filename: "{app}\Warden.exe"
