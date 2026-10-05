@@ -498,6 +498,15 @@ namespace Warden
                 bool presetChanged = selectedPreset.Value != savedPresetId;
                 if (!keyChanged && !presetChanged) return;
 
+                // Başka bir kuralın exe'sine çevrilirse o kural sessizce eziliyordu → engelle ve satırı eski haline getir
+                if (keyChanged && _context.Config.Rules.ContainsKey(newKey))
+                {
+                    MessageBox.Show(Loc.Format("RuleExists", newKey), Loc.Get("Warning"),
+                                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                    Dispatcher.BeginInvoke(new Action(RenderRulesList));
+                    return;
+                }
+
                 if (keyChanged)
                 {
                     _context.Config.Rules.Remove(originalKey);
