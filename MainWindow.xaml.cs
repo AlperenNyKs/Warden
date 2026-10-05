@@ -204,6 +204,21 @@ namespace Warden
         private void BtnNavStatus_Click(object sender, RoutedEventArgs e)
             => ShowPage("status");
 
+        // ── Sol alttaki Sonar göstergesi ──
+        private void SetSonarIndicator(Color color)
+        {
+            ledStatus.Fill = new SolidColorBrush(color);
+            txtSonarLabel.Foreground = new SolidColorBrush(color);
+        }
+
+        private void SonarWidget_ToolTipOpening(object sender, System.Windows.Controls.ToolTipEventArgs e)
+        {
+            string preset = string.IsNullOrWhiteSpace(txtActivePreset.Text) ? "" : "\n" + txtActivePreset.Text;
+            sonarWidget.ToolTip = $"{txtConnectionStatus.Text}{preset}\n{Loc.Get("SonarWidgetHint")}";
+        }
+
+        private void SonarWidget_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) => ShowPage("status");
+
         /// <summary>İlk açılışta tepsi çağırır: durum sayfasını göster.</summary>
         public void ShowStatusPage() => ShowPage("status");
 
@@ -305,13 +320,13 @@ namespace Warden
             _isLoadingPresets = true;
 
             txtConnectionStatus.Text = Loc.Get("Connecting");
-            ledStatus.Fill = new SolidColorBrush(Color.FromRgb(120, 120, 160));
+            SetSonarIndicator(Color.FromRgb(120, 120, 160));
 
             try
             {
                 string address = await _client.GetSonarAddressAsync();
-                txtConnectionStatus.Text = $"● {address.Replace("http://", "").Replace("https://", "")}";
-                ledStatus.Fill = new SolidColorBrush(Color.FromRgb(78, 201, 126));
+                txtConnectionStatus.Text = Loc.Format("SonarConnectedAt", address.Replace("http://", "").Replace("https://", ""));
+                SetSonarIndicator(Color.FromRgb(78, 201, 126));
 
                 _availablePresets = await _client.GetConfigsAsync();
 
@@ -343,7 +358,7 @@ namespace Warden
             catch (Exception ex)
             {
                 txtConnectionStatus.Text = Loc.Get("ConnFailed");
-                ledStatus.Fill = new SolidColorBrush(Color.FromRgb(224, 85, 85));
+                SetSonarIndicator(Color.FromRgb(224, 85, 85));
                 txtActivePreset.Text = ex.Message;
             }
             finally
@@ -638,6 +653,7 @@ namespace Warden
         {
             lblScanBtn.Text = Loc.Get("Scanning");
             btnScan.IsEnabled = false;
+            string scanResult = "";
 
             try
             {
@@ -659,27 +675,23 @@ namespace Warden
                 _context.SaveConfig();
                 RenderRulesList();
 
-                if (added > 0)
-                {
-                    txtActivePreset.Text = Loc.Format("ScanDone", added);
-                    ledActive.Fill = new SolidColorBrush(Color.FromRgb(78, 201, 126));
-                }
-                else
-                {
-                    txtActivePreset.Text = Loc.Get("ScanNone");
-                    ledActive.Fill = new SolidColorBrush(Color.FromRgb(120, 120, 160));
-                }
+                // Sonuç, kimsenin görmediği sol alttaki küçük kutu yerine butonun üzerinde gösterilir
+                scanResult = added > 0 ? Loc.Format("ScanDone", added) : Loc.Get("ScanNone");
             }
             catch (Exception ex)
             {
-                txtActivePreset.Text = ex.Message;
+                scanResult = ex.Message;
+                MessageBox.Show(ex.Message, "Warden", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             finally
             {
                 // Hata olsa bile buton tekrar kullanılabilir olmalı (eskiden kalıcı olarak devre dışı kalabiliyordu)
-                lblScanBtn.Text = Loc.Get("BtnScan");
                 btnScan.IsEnabled = true;
             }
+
+            lblScanBtn.Text = "✔ " + scanResult;
+            await Task.Delay(3000);
+            lblScanBtn.Text = Loc.Get("BtnScan");
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -1299,6 +1311,7 @@ namespace Warden
         {
             // Title Bar & Chrome
             txtOnlineBadge.Text         = Loc.Get("Online");
+            txtVersionBadge.Text        = "v" + UpdateService.CurrentVersion.ToString(3);
             btnMinimizeTitle.ToolTip    = Loc.Get("ToolTipMinimize");
             btnMaximizeTitle.ToolTip    = Loc.Get("ToolTipMaximize");
             btnCloseTitle.ToolTip       = Loc.Get("ToolTipClose");

@@ -52,7 +52,7 @@
         <!-- ── ScrollBar Style ── -->
         <Style TargetType="ScrollBar">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Width" Value="6"/>
+            <Setter Property="Width" Value="8"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ScrollBar">
@@ -62,7 +62,15 @@
                                     <Thumb>
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
-                                                <Border Background="#1C3034" CornerRadius="3" Margin="1,0"/>
+                                                <Border x:Name="thumbBorder" Background="#3A5C62" CornerRadius="3" Margin="1,0"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="thumbBorder" Property="Background" Value="#00C9B1"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="thumbBorder" Property="Background" Value="#00C9B1"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
                                             </ControlTemplate>
                                         </Thumb.Template>
                                     </Thumb>
@@ -425,6 +433,8 @@
                     </Border>
                     <TextBlock Text="Warden" Foreground="{StaticResource TxtPrimary}"
                                FontWeight="Bold" FontSize="13" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="txtVersionBadge" Text="" Foreground="{StaticResource TxtSecond}"
+                               FontSize="10" VerticalAlignment="Center" Margin="6,1,0,0"/>
                     
                     <!-- Status Badge Pill -->
                     <Border Background="{StaticResource AccentPill}" CornerRadius="10"
@@ -542,23 +552,24 @@
                         </StackPanel>
 
                         <!-- Bottom Status Widget -->
+                        <!-- Sonar bağlantı göstergesi: yalnızca ışık + "Sonar"; ayrıntılar ipucunda, tıklayınca Sistem Durumu -->
                         <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,16"
                                     HorizontalAlignment="Center">
-                            <Border Background="{StaticResource BgSurface}" CornerRadius="10"
+                            <Border x:Name="sonarWidget" Background="{StaticResource BgSurface}" CornerRadius="10"
                                     BorderBrush="{StaticResource Border}" BorderThickness="1"
-                                    Padding="6,8" Width="56">
+                                    Padding="6,8" Width="56" Cursor="Hand" ToolTip=" "
+                                    ToolTipOpening="SonarWidget_ToolTipOpening"
+                                    MouseLeftButtonUp="SonarWidget_MouseLeftButtonUp">
                                 <StackPanel>
                                     <Ellipse x:Name="ledStatus" Width="9" Height="9"
                                              Fill="{StaticResource Accent}"
                                              HorizontalAlignment="Center" Margin="0,0,0,5"/>
-                                    <TextBlock x:Name="txtConnectionStatus" Text="● Bağlı"
+                                    <TextBlock x:Name="txtSonarLabel" Text="Sonar"
                                                Foreground="{StaticResource Accent}" FontSize="9"
-                                               FontWeight="Bold" HorizontalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock x:Name="txtActivePreset" Text="Desktop"
-                                               Foreground="{StaticResource TxtSecond}" FontSize="8"
-                                               HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                               Margin="0,3,0,0"/>
+                                               FontWeight="Bold" HorizontalAlignment="Center"/>
+                                    <!-- İpucu için tutulan durum metinleri (görünmez) -->
+                                    <TextBlock x:Name="txtConnectionStatus" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="txtActivePreset" Visibility="Collapsed"/>
                                     <Ellipse x:Name="ledActive" Width="0" Height="0" Visibility="Collapsed"/>
                                 </StackPanel>
                             </Border>
@@ -1049,56 +1060,6 @@
                                         </Grid>
                                     </Border>
 
-                                    <!-- ── Sıcaklık alarmı ── -->
-                                    <TextBlock x:Name="lblTempAlarmSection" Text="SICAKLIK ALARMI"
-                                               Foreground="{StaticResource TxtSecond}"
-                                               FontSize="10" FontWeight="Bold" Margin="0,22,0,12"/>
-
-                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
-                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock x:Name="lblTempAlarm" Text="Sıcaklık alarmı"
-                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
-                                                <TextBlock x:Name="lblTempAlarmDesc"
-                                                           Text="Sıcaklık 10 saniye boyunca sınırın üstünde kalırsa bildirim gönderir."
-                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
-                                            </StackPanel>
-                                            <CheckBox x:Name="chkTempAlarm" Grid.Column="1"
-                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
-                                                      VerticalAlignment="Center"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
-                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="90"/>
-                                                <ColumnDefinition Width="16"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="90"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock x:Name="lblCpuTempLimit" Text="CPU sınırı (°C)"
-                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"
-                                                       VerticalAlignment="Center"/>
-                                            <TextBox x:Name="txtCpuTempLimit" Grid.Column="1"
-                                                     HorizontalContentAlignment="Center"
-                                                     LostFocus="TxtTempLimit_LostFocus"/>
-                                            <TextBlock x:Name="lblGpuTempLimit" Grid.Column="3" Text="GPU sınırı (°C)"
-                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"
-                                                       VerticalAlignment="Center"/>
-                                            <TextBox x:Name="txtGpuTempLimit" Grid.Column="4"
-                                                     HorizontalContentAlignment="Center"
-                                                     LostFocus="TxtTempLimit_LostFocus"/>
-                                        </Grid>
-                                    </Border>
-
                                     <!-- ── Güncellemeler ── -->
                                     <TextBlock x:Name="lblUpdatesSection" Text="GÜNCELLEMELER"
                                                Foreground="{StaticResource TxtSecond}"
@@ -1151,6 +1112,56 @@
                                             </StackPanel>
                                         </Grid>
                                     </Border>
+                                    <!-- ── Sıcaklık alarmı ── -->
+                                    <TextBlock x:Name="lblTempAlarmSection" Text="SICAKLIK ALARMI"
+                                               Foreground="{StaticResource TxtSecond}"
+                                               FontSize="10" FontWeight="Bold" Margin="0,22,0,12"/>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblTempAlarm" Text="Sıcaklık alarmı"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblTempAlarmDesc"
+                                                           Text="Sıcaklık 10 saniye boyunca sınırın üstünde kalırsa bildirim gönderir."
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkTempAlarm" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="16"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="90"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="lblCpuTempLimit" Text="CPU sınırı (°C)"
+                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBox x:Name="txtCpuTempLimit" Grid.Column="1"
+                                                     HorizontalContentAlignment="Center"
+                                                     LostFocus="TxtTempLimit_LostFocus"/>
+                                            <TextBlock x:Name="lblGpuTempLimit" Grid.Column="3" Text="GPU sınırı (°C)"
+                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBox x:Name="txtGpuTempLimit" Grid.Column="4"
+                                                     HorizontalContentAlignment="Center"
+                                                     LostFocus="TxtTempLimit_LostFocus"/>
+                                        </Grid>
+                                    </Border>
+
                                 </StackPanel>
                                 </ScrollViewer>
                             </Border>
