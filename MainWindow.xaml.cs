@@ -1151,20 +1151,52 @@ namespace Warden
             }
         }
 
+        // Grafik legend'ı ve çizgileri her saniye sıfırdan kurulmaz: sensör kümesi değişmedikçe mevcut
+        // kontroller güncellenir. Eskiden ✕ butonu her tick'te yok edilip yeniden oluşturulduğu için
+        // tıklama, yenilemeye denk gelince boşa gidiyordu.
+        private readonly Dictionary<string, (TextBlock Text, System.Windows.Shapes.Rectangle Dot)> _legendControls = new();
+        private readonly Dictionary<string, (System.Windows.Shapes.Polyline Line, System.Windows.Shapes.Ellipse Dot)> _chartShapes = new();
+        private string _lastLegendKey = "";
+
         private void RenderGraph(List<TelemetrySensorItem> graphSensors)
         {
-            wpGraphLegend.Children.Clear();
-
             if (graphSensors.Count == 0)
             {
                 txtNoGraphHint.Visibility = Visibility.Visible;
+                wpGraphLegend.Children.Clear();
                 cvsChart.Children.Clear();
+                _legendControls.Clear();
+                _chartShapes.Clear();
+                _lastLegendKey = "";
                 return;
             }
 
             txtNoGraphHint.Visibility = Visibility.Collapsed;
 
-            // Legend badges
+            string key = string.Join(",", graphSensors.Select(s => s.Id));
+            if (key != _lastLegendKey || _legendControls.Count != graphSensors.Count)
+            {
+                _lastLegendKey = key;
+                RebuildLegend(graphSensors);
+            }
+            else
+            {
+                foreach (var s in graphSensors)
+                {
+                    if (!_legendControls.TryGetValue(s.Id, out var c)) continue;
+                    c.Text.Text = $"{s.Name}: {s.FormattedValue}";
+                    c.Dot.Fill = BrushFrom(s.GraphColor);
+                }
+            }
+
+            DrawChartLines(graphSensors);
+        }
+
+        private void RebuildLegend(List<TelemetrySensorItem> graphSensors)
+        {
+            wpGraphLegend.Children.Clear();
+            _legendControls.Clear();
+
             foreach (var s in graphSensors)
             {
                 var badge = new Border
@@ -1224,9 +1256,8 @@ namespace Warden
 
                 badge.Child = sp;
                 wpGraphLegend.Children.Add(badge);
+                _legendControls[s.Id] = (txt, colorDot);
             }
-
-            DrawChartLines(graphSensors);
         }
 
         private void DrawChartLines(List<TelemetrySensorItem> graphSensors)
@@ -1235,7 +1266,14 @@ namespace Warden
             double height = cvsChart.ActualHeight;
             if (width <= 20 || height <= 20) return;
 
-            cvsChart.Children.Clear();
+            // Grafikten çıkarılan sensörlerin şekillerini kaldır
+            var activeIds = new HashSet<string>(graphSensors.Select(s => s.Id));
+            foreach (var staleId in _chartShapes.Keys.Where(id => !activeIds.Contains(id)).ToList())
+            {
+                cvsChart.Children.Remove(_chartShapes[staleId].Line);
+                cvsChart.Children.Remove(_chartShapes[staleId].Dot);
+                _chartShapes.Remove(staleId);
+            }
 
             // Find min/max for scaling
             float minVal = 0f;
@@ -1252,15 +1290,30 @@ namespace Warden
             float range = maxVal - minVal;
             if (range <= 0.01f) range = 1f;
 
+            double stepX = width / 59.0;
+
             foreach (var s in graphSensors)
             {
-                if (s.History.Count < 2) continue;
+                if (!_chartShapes.TryGetValue(s.Id, out var shapes))
+                {
+                    shapes = (
+                        new System.Windows.Shapes.Polyline { StrokeThickness = 2.0, StrokeLineJoin = PenLineJoin.Round },
+                        new System.Windows.Shapes.Ellipse { Width = 6, Height = 6 });
+                    cvsChart.Children.Add(shapes.Line);
+                    cvsChart.Children.Add(shapes.Dot);
+                    _chartShapes[s.Id] = shapes;
+                }
+
+                int count = s.History.Count;
+                if (count < 2)
+                {
+                    shapes.Line.Visibility = Visibility.Collapsed;
+                    shapes.Dot.Visibility = Visibility.Collapsed;
+                    continue;
+                }
 
                 var strokeBrush = BrushFrom(s.GraphColor);
-                var points = new PointCollection();
-                int count = s.History.Count;
-                double stepX = width / 59.0;
-
+                var points = new PointCollection(count);
                 Point lastPoint = new Point();
                 for (int i = 0; i < count; i++)
                 {
@@ -1270,29 +1323,19 @@ namespace Warden
                     if (y < 4) y = 4;
                     if (y > height - 4) y = height - 4;
 
-                    var pt = new Point(x, y);
-                    points.Add(pt);
-                    if (i == count - 1) lastPoint = pt;
+                    lastPoint = new Point(x, y);
+                    points.Add(lastPoint);
                 }
+                points.Freeze();
 
-                var polyline = new System.Windows.Shapes.Polyline
-                {
-                    Points = points,
-                    Stroke = strokeBrush,
-                    StrokeThickness = 2.0,
-                    StrokeLineJoin = PenLineJoin.Round
-                };
-                cvsChart.Children.Add(polyline);
+                shapes.Line.Points = points;
+                shapes.Line.Stroke = strokeBrush;
+                shapes.Line.Visibility = Visibility.Visible;
 
-                var dot = new System.Windows.Shapes.Ellipse
-                {
-                    Width = 6,
-                    Height = 6,
-                    Fill = strokeBrush
-                };
-                Canvas.SetLeft(dot, lastPoint.X - 3);
-                Canvas.SetTop(dot, lastPoint.Y - 3);
-                cvsChart.Children.Add(dot);
+                shapes.Dot.Fill = strokeBrush;
+                shapes.Dot.Visibility = Visibility.Visible;
+                Canvas.SetLeft(shapes.Dot, lastPoint.X - 3);
+                Canvas.SetTop(shapes.Dot, lastPoint.Y - 3);
             }
         }
 
