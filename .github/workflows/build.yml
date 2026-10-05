@@ -31,14 +31,26 @@ jobs:
       - name: Test
         run: dotnet test Tests/Warden.Tests/Warden.Tests.csproj -c Release --logger "console;verbosity=normal"
 
+      # Sürüm ve yayın kararı:
+      #  - v* etiketi        → etiketteki sürüm, Release oluştur
+      #  - main'e push       → <Version> için Release yoksa onu yayınla (sürümü artırıp merge etmek yeterli)
+      #  - diğerleri (PR vb.) → <Version>-ci.N, yayın yok
       - name: Determine version
         id: ver
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           [xml]$proj = Get-Content Warden.csproj
           $base = ([string]$proj.Project.PropertyGroup.Version).Trim()
+          $release = $false
           if ("${{ github.ref_type }}" -eq "tag") {
             $version = "${{ github.ref_name }}".TrimStart('v')
+            $release = $true
+          } elseif ("${{ github.event_name }}" -eq "push" -and "${{ github.ref }}" -eq "refs/heads/main") {
+            gh release view "v$base" --repo "${{ github.repository }}" *> $null
+            if ($LASTEXITCODE -ne 0) { $version = $base; $release = $true }
+            else { $version = "$base-ci.${{ github.run_number }}" }
           } else {
             $version = "$base-ci.${{ github.run_number }}"
           }
@@ -47,7 +59,9 @@ jobs:
           $numeric = ($parts[0..3] -join '.')
           "version=$version" >> $env:GITHUB_OUTPUT
           "numeric=$numeric" >> $env:GITHUB_OUTPUT
-          Write-Host "Version: $version ($numeric)"
+          "release=$($release.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version ($numeric), release: $release"
+          $global:LASTEXITCODE = 0
 
       # Self-contained: hedef bilgisayarda .NET 10 Desktop Runtime kurulu olması gerekmez
       - name: Publish (self-contained win-x64)
@@ -71,10 +85,12 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub Release
-        if: github.ref_type == 'tag'
+        if: steps.ver.outputs.release == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" (Get-ChildItem installer-output\*.exe).FullName `
+          $tag = "v${{ steps.ver.outputs.version }}"
+          gh release create $tag (Get-ChildItem installer-output\*.exe).FullName `
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" `
             --title "Warden ${{ steps.ver.outputs.version }}" --generate-notes

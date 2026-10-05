@@ -53,7 +53,7 @@ dotnet publish Warden.csproj -c Release -r win-x64 --self-contained true -o publ
 # -> installer-output\Warden-Setup-1.0.0.exe
 ```
 
-*Releasing:* push a tag like `v1.0.1`; CI builds the setup and attaches it to a GitHub Release.
+*Releasing:* bump `<Version>` in `Warden.csproj` and merge to `main`; if there is no `v<Version>` release yet, CI builds the setup and publishes it as a GitHub Release (pushing a `v*` tag works too).
 
 > **"Start with Windows" requires a protected install folder.** Warden is launched at logon with administrator
 > rights (Task Scheduler, `/rl highest`). If its folder is writable by standard users (e.g. `D:\Warden\bin\...`),
