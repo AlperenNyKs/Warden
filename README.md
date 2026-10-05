@@ -31,9 +31,13 @@ Warden integrates directly with:
 
 ## 📦 Installation & Running
 
-1. Build or download the latest release.
-2. Run **`Warden.exe`**.
-3. Warden will minimize to your system tray. Click the tray icon to open the dashboard.
+1. Download **`Warden-Setup-x.y.z.exe`** from the [Releases](https://github.com/AlperenNyKs/Warden/releases) page.
+2. Run it. Warden installs to `C:\Program Files\Warden` (self-contained, no .NET runtime needed) and can optionally
+   install the **PawnIO** driver (required for CPU temperature/clock/power sensors).
+3. Warden starts in the system tray. Turn on **Start with Windows** in Settings if you want it at logon.
+
+Upgrading: just run the newer setup; your settings in `%AppData%\Warden` are kept.
+Uninstalling also removes the "Warden" startup task.
 
 *To build from source:*
 ```bash
@@ -42,13 +46,19 @@ cd Warden
 dotnet build -c Release
 ```
 
+*To build the installer locally* (requires [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+```powershell
+dotnet publish Warden.csproj -c Release -r win-x64 --self-contained true -o publish
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\Warden.iss
+# -> installer-output\Warden-Setup-1.0.0.exe
+```
+
+*Releasing:* push a tag like `v1.0.1`; CI builds the setup and attaches it to a GitHub Release.
+
 > **"Start with Windows" requires a protected install folder.** Warden is launched at logon with administrator
 > rights (Task Scheduler, `/rl highest`). If its folder is writable by standard users (e.g. `D:\Warden\bin\...`),
 > any program could swap `Warden.exe` or a DLL and get admin rights, so Warden refuses to register the task there.
-> Publish it to Program Files from an **elevated** terminal instead:
-> ```powershell
-> dotnet publish -c Release -o "C:\Program Files\Warden"
-> ```
+> The installer puts it in Program Files, which is safe.
 
 ---
 

@@ -1,45 +1,32 @@
 # 🛡️ Warden — Hızlı Başlangıç & Kullanım Kılavuzu
 
-## 📂 1. Uygulama ve Dosya Konumları
+## 📦 1. Kurulum
 
-- **Proje Ana Klasörü:**  
-  `D:\Warden\`
+1. GitHub'da **Releases** sayfasından en son **`Warden-Setup-x.y.z.exe`** dosyasını indir.
+2. Çalıştır. Windows "Bilgisayarınız korundu" (SmartScreen) derse: **Ek bilgi → Yine de çalıştır**
+   (setup imzasız olduğu için bu uyarı normal).
+3. Kurulumda **"PawnIO sürücüsünü kur"** seçili kalsın (CPU sıcaklık/saat/güç sensörleri için gerekli).
+4. Bitince Warden tepside açılır. Açılışta başlasın istiyorsan **Ayarlar → Windows ile başlat**.
 
-- **Çalıştırılabilir Uygulama Dosyası (`.exe`):**  
-  `D:\Warden\bin\Release\net10.0-windows\Warden.exe`
+- **Güncelleme:** Yeni sürümün setup'ını çalıştırman yeterli; ayarların korunur.
+- **Kaldırma:** Ayarlar → Uygulamalar → Warden → Kaldır (açılış görevi de silinir).
 
-- **Ayar ve Log Klasörü (AppData):**  
-  `%AppData%\Warden\`  
-  *(Çalıştır penceresine `Win + R` basıp `%AppData%\Warden` yazarak açabilirsiniz)*
+## 📂 2. Dosya Konumları
+
+- **Uygulama:** `C:\Program Files\Warden\Warden.exe`
+- **Ayar ve Log Klasörü (AppData):** `%AppData%\Warden\`
+  *(`Win + R` → `%AppData%\Warden`)*
   - `config.json` → Tüm kural, gecikme, telemetri favorileri ve ayarlar
   - `logs\service.log` → Arka plan çalışma kayıtları (otomatik 1 MB rotasyonlu)
   - `logs\telemetry.log` → Donanım sensörleri ve telemetri logları
   - `logs\crash.log` → Olası hata kayıtları
 
-> ⚠️ **"Windows ile başlat" için korumalı klasör şart.** Warden oturum açılışında yönetici yetkisiyle başlatılır.
-> `D:\Warden\bin\...` gibi standart kullanıcının yazabildiği bir klasörden çalışıyorsa, herhangi bir program
-> `Warden.exe`'yi veya bir DLL'ini değiştirip yönetici yetkisi kazanabilir; bu yüzden Warden orada başlangıç görevi
-> oluşturmaz. Kalıcı kullanım için **yönetici** PowerShell'de yayınlayın:
-> ```powershell
-> cd D:\Warden
-> dotnet publish -c Release -o "C:\Program Files\Warden"
-> ```
-> Ardından `C:\Program Files\Warden\Warden.exe`'yi çalıştırıp ayarlardan "Windows ile başlat"ı açın.
+> ⚠️ **"Windows ile başlat" yalnızca korumalı klasörde çalışır.** Warden oturum açılışında yönetici yetkisiyle
+> başlatılır. `D:\Warden\bin\...` gibi standart kullanıcının yazabildiği bir klasörden çalışırsa, herhangi bir
+> program `Warden.exe`'yi veya bir DLL'ini değiştirip yönetici yetkisi kazanabilir; bu yüzden Warden orada
+> başlangıç görevi oluşturmaz. Setup ile Program Files'a kurmak bu sorunu çözer.
 
----
-
-## 🚀 2. Uygulamayı Nasıl Açarım?
-
-### Yöntem 1: Masaüstü Kısayolu ile Açma (Önerilen)
-- Masaüstündeki **Warden** kısayoluna çift tıklayın.
-- Uygulama sistem tepsisinde (**sağ alttaki bildirim alanı / Tray**) kalkan ikonuyla çalışır. Eğer zaten arka planda açıksa doğrudan kontrol panelini ekrana getirir.
-
-### Yöntem 2: Doğrudan `.exe` ile Açma
-1. `D:\Warden\bin\Release\net10.0-windows\` klasörüne gidin.
-2. **`Warden.exe`** dosyasına çift tıklayın.
-
-### Yöntem 3: Terminalden Açma
-PowerShell veya Komut Satırı üzerinden:
+### Geliştirici: kaynaktan çalıştırma
 ```powershell
 cd D:\Warden
 dotnet run -c Release
