@@ -548,7 +548,7 @@ namespace Warden
         private static readonly System.Text.RegularExpressions.Regex TokenRegex =
             new(@"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", System.Text.RegularExpressions.RegexOptions.Compiled);
 
-        private static bool IsSystemExe(string exeName)
+        internal static bool IsSystemExe(string exeName)
         {
             string baseName = Path.GetFileNameWithoutExtension(exeName);
             string lower = baseName.ToLowerInvariant();

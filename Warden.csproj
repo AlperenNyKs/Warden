@@ -15,6 +15,15 @@
     <SatelliteResourceLanguages>en;tr</SatelliteResourceLanguages>
   </PropertyGroup>
 
+  <!-- Test projesi aynı klasör ağacında: kaynakları/çıktıları ana uygulamaya derlenmesin -->
+  <ItemGroup>
+    <Compile Remove="Tests\**" />
+    <Page Remove="Tests\**" />
+    <None Remove="Tests\**" />
+    <EmbeddedResource Remove="Tests\**" />
+    <InternalsVisibleTo Include="Warden.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Assets\icon.ico" />
     <Resource Include="Assets\icon.png" />

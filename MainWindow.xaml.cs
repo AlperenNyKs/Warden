@@ -496,7 +496,7 @@ namespace Warden
             // Save logic
             Action saveRule = () =>
             {
-                string newKey = ExtractExeName(cbExe.Text);
+                string newKey = ExeNameHelper.ExtractExeName(cbExe.Text);
 
                 var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
 
@@ -594,7 +594,7 @@ namespace Warden
 
             Action addRule = () =>
             {
-                string newKey = ExtractExeName(cbExe.Text);
+                string newKey = ExeNameHelper.ExtractExeName(cbExe.Text);
 
                 var selectedPreset = cbPreset.SelectedItem as PresetComboBoxItem;
 
@@ -620,18 +620,6 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         //  UI Event Handlers – Profiles Page
         // ══════════════════════════════════════════════════════════════
-
-        /// <summary>"Oyun Adı (oyun.exe)" biçimindeki görünen metinden exe adını çıkarır.</summary>
-        private static string ExtractExeName(string text)
-        {
-            string key = (text ?? "").Trim();
-            if (key.EndsWith(")") && key.Contains('('))
-            {
-                int start = key.LastIndexOf('(');
-                key = key.Substring(start + 1, key.Length - start - 2).Trim();
-            }
-            return key;
-        }
 
         private void CbDefaultPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
