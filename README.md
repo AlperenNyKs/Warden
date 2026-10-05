@@ -36,7 +36,7 @@ Warden integrates directly with:
    install the **PawnIO** driver (required for CPU temperature/clock/power sensors).
 3. Warden starts in the system tray. Turn on **Start with Windows** in Settings if you want it at logon.
 
-Upgrading: just run the newer setup; your settings in `%AppData%\Warden` are kept.
+Upgrading: Warden checks GitHub Releases at startup and every 6 hours (Settings → Updates) and offers to install a new version; the setup is verified against the release's SHA256 digest before it runs. You can also just run a newer setup manually; your settings in `%AppData%\Warden` are kept.
 Uninstalling also removes the "Warden" startup task.
 
 *To build from source:*

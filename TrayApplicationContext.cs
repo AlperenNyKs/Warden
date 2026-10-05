@@ -17,7 +17,7 @@ namespace Warden
     public class TrayApplicationContext
     {
         private readonly NotifyIcon _trayIcon;
-        private readonly ToolStripMenuItem _menuOpen, _menuReload, _menuDiscover, _menuExit;
+        private readonly ToolStripMenuItem _menuOpen, _menuReload, _menuDiscover, _menuExit, _menuUpdate;
         private readonly SteelSeriesClient _client;
         private readonly Application _app;
         private SonarWatcher? _watcher;
@@ -37,6 +37,20 @@ namespace Warden
         private bool _gpuIneffectiveLogged;       // "Profil işe yaramadı" logu bir kez yazılır
         private bool _afterburnerMissingLogged;   // "Afterburner yok" logu bir kez yazılır
         private (double TargetMhz, int TargetProfile) _gpuAppliedFor;
+
+        // Güncellemeler
+        private readonly UpdateService _updateService = new();
+        private System.Threading.Timer? _updateTimer;
+        private UpdateInfo? _pendingUpdate;
+        private Version? _lastNotifiedUpdate;
+        private bool _lastBalloonIsUpdate;
+        private int _updateBusy;                       // kontrol/kurulum aynı anda iki kez çalışmasın
+        private static readonly TimeSpan UpdateFirstCheckDelay = TimeSpan.FromMinutes(1);
+        private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(6);
+
+        /// <summary>Son kontrol sonucu (ayarlar sayfası açılınca gösterilir).</summary>
+        public UpdateCheckResult? LastUpdateResult { get; private set; }
+        public UpdateInfo? PendingUpdate => _pendingUpdate;
 
         // Akıllı ReloadConfig: interval değişmediğinde watcher'ı yeniden başlatmamak için
         private int _lastIntervalMs = 0;
@@ -75,6 +89,11 @@ namespace Warden
                 if (e.Button == MouseButtons.Left)
                     ShowMainWindow();
             };
+            _trayIcon.BalloonTipClicked += (s, e) =>
+            {
+                if (_lastBalloonIsUpdate && _pendingUpdate != null)
+                    _ = ConfirmAndInstallUpdateAsync();
+            };
 
             // 2. Context Menu (metinler her açılışta seçili dile göre yenilenir)
             // Menü bir kez oluşturulur; dil değişince yalnızca metinler güncellenir (UpdateTrayMenu)
@@ -83,6 +102,8 @@ namespace Warden
             _menuReload   = new ToolStripMenuItem("", null, (s, e) => ReloadConfigFromDisk());
             _menuDiscover = new ToolStripMenuItem("", null, async (s, e) => await DiscoverFromTray());
             _menuExit     = new ToolStripMenuItem("", null, (s, e) => Exit());
+            _menuUpdate   = new ToolStripMenuItem("", null, (s, e) => _ = ConfirmAndInstallUpdateAsync()) { Visible = false };
+            contextMenu.Items.Add(_menuUpdate);
             contextMenu.Items.Add(_menuOpen);
             contextMenu.Items.Add(_menuReload);
             contextMenu.Items.Add(_menuDiscover);
@@ -94,7 +115,11 @@ namespace Warden
             // 3. Load config and start watcher (menü metinleri de burada seçili dile göre ayarlanır)
             LoadConfigAndStart();
 
-            // 4. Pre-create MainWindow on background idle dispatcher so opening from tray is instantaneous (0ms)
+            // 4. Güncelleme kontrolü (önceki güncellemeden kalan setup dosyalarını da temizler)
+            UpdateService.CleanupOldDownloads();
+            ApplyUpdateSchedule();
+
+            // 5. Pre-create MainWindow on background idle dispatcher so opening from tray is instantaneous (0ms)
             _app.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
             {
                 try
@@ -140,6 +165,9 @@ namespace Warden
             _menuReload.Text   = Loc.Get("TrayReloadConfig");
             _menuDiscover.Text = Loc.Get("TrayDiscoverPresets");
             _menuExit.Text     = Loc.Get("TrayExit");
+            _menuUpdate.Visible = _pendingUpdate != null;
+            if (_pendingUpdate != null)
+                _menuUpdate.Text = Loc.Format("TrayInstallUpdate", _pendingUpdate.Tag);
         }
 
         /// <summary>
@@ -151,6 +179,7 @@ namespace Warden
                 AppConfig.MinCheckIntervalMs, AppConfig.MaxCheckIntervalMs);
             Loc.CurrentLang = Config.Language;
             ApplyStartupIfChanged();
+            ApplyUpdateSchedule();
 
             // Interval değiştiyse veya watcher hiç oluşturulmadıysa → watcher'ı yeniden oluştur
             if (_watcher == null || Config.CheckIntervalMilliseconds != _lastIntervalMs)
@@ -534,6 +563,126 @@ namespace Warden
                             Loc.Get("StartupInsecureTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
+        // ── Güncellemeler ───────────────────────────────────────────────
+
+        /// <summary>Otomatik kontrol ayarına göre zamanlayıcıyı başlatır/durdurur.</summary>
+        private void ApplyUpdateSchedule()
+        {
+            if (Config.AutoCheckUpdates)
+            {
+                _updateTimer ??= new System.Threading.Timer(
+                    async _ => await CheckForUpdatesAsync(manual: false),
+                    null, UpdateFirstCheckDelay, UpdateCheckInterval);
+            }
+            else
+            {
+                _updateTimer?.Dispose();
+                _updateTimer = null;
+            }
+        }
+
+        /// <summary>GitHub'da yeni sürüm var mı bakar; sonucu ayarlar sayfasına ve (otomatikse) tepsiye bildirir.</summary>
+        public async Task<UpdateCheckResult> CheckForUpdatesAsync(bool manual)
+        {
+            if (Interlocked.CompareExchange(ref _updateBusy, 1, 0) != 0)
+                return LastUpdateResult ?? new UpdateCheckResult(UpdateCheckStatus.Error, null, "busy");
+
+            try
+            {
+                if (manual) PostUpdateStatus(null);   // "kontrol ediliyor"
+                var result = await _updateService.CheckAsync().ConfigureAwait(false);
+
+                // Aynı "erişilemedi" durumunu her 6 saatte bir loglamaya gerek yok
+                if (result.Status != LastUpdateResult?.Status || result.Status == UpdateCheckStatus.UpdateAvailable)
+                    Log($"[Update] {result.Status}: {result.Message} (current {UpdateService.CurrentVersion.ToString(3)})");
+
+                LastUpdateResult = result;
+                if (result.Status == UpdateCheckStatus.UpdateAvailable && result.Update != null)
+                {
+                    _pendingUpdate = result.Update;
+                    if (!manual && _lastNotifiedUpdate != result.Update.Version)
+                    {
+                        _lastNotifiedUpdate = result.Update.Version;
+                        ShowBalloon(10000, Loc.Format("UpdateBalloon", result.Update.Tag), ToolTipIcon.Info, isUpdate: true);
+                    }
+                }
+                else if (result.Status == UpdateCheckStatus.UpToDate)
+                {
+                    _pendingUpdate = null;
+                }
+
+                PostUpdateStatus(result);
+                return result;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _updateBusy, 0);
+            }
+        }
+
+        /// <summary>Kullanıcıya sorar, onaylarsa indirip kurar (UI thread'inden çağrılır).</summary>
+        public async Task ConfirmAndInstallUpdateAsync()
+        {
+            var update = _pendingUpdate;
+            if (update == null) return;
+
+            var answer = MessageBox.Show(Loc.Format("UpdateConfirm", update.Tag), Loc.Get("UpdateConfirmTitle"),
+                                         MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes) return;
+
+            if (Interlocked.CompareExchange(ref _updateBusy, 1, 0) != 0) return;
+            try
+            {
+                var progress = new Progress<double>(p =>
+                    _mainWindow?.ShowUpdateMessage(Loc.Format("UpdateDownloading", (int)Math.Round(p * 100)), busy: true));
+
+                int exitCode = await _updateService.DownloadAndInstallAsync(update, progress, Log, onInstallerStarted: () =>
+                {
+                    // Setup başladı: birazdan Warden'ı kapatıp yeni sürümü açacak. Kapanınca tepside
+                    // "hayalet" ikon kalmasın diye ikon şimdiden gizlenir.
+                    _app.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        _mainWindow?.ShowUpdateMessage(Loc.Get("UpdateInstalling"), busy: true);
+                        _mainWindow?.Hide();
+                        _trayIcon.Visible = false;
+                    }));
+                });
+
+                // Buraya gelindiyse setup Warden'ı kapatmadan bitti → iptal edildi veya başarısız oldu
+                await _app.Dispatcher.InvokeAsync(() =>
+                {
+                    _trayIcon.Visible = true;
+                    _mainWindow?.ShowUpdateMessage(Loc.Get("UpdateCancelled"), busy: false);
+                });
+                ShowBalloon(5000, Loc.Get("UpdateCancelled"), ToolTipIcon.Warning);
+                Log($"[Update] Installer exit code {exitCode}");
+            }
+            catch (Exception ex)
+            {
+                Log($"[Update] Failed: {ex}");
+                string reason = ex is InvalidDataException ? Loc.Get("UpdateHashMismatch") : ex.Message;
+                await _app.Dispatcher.InvokeAsync(() =>
+                {
+                    _trayIcon.Visible = true;
+                    _mainWindow?.ShowUpdateMessage(Loc.Format("UpdateFailed", reason), busy: false);
+                });
+                ShowBalloon(5000, Loc.Format("UpdateFailed", reason), ToolTipIcon.Error);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _updateBusy, 0);
+            }
+        }
+
+        private void PostUpdateStatus(UpdateCheckResult? result)
+        {
+            _app.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                UpdateTrayMenu();
+                _mainWindow?.ShowUpdateStatus(result);
+            }));
+        }
+
         private async Task DiscoverFromTray()
         {
             try
@@ -584,12 +733,13 @@ namespace Warden
         /// NotifyIcon bir WinForms nesnesidir ve thread-safe değildir; watcher/timer thread'lerinden
         /// gelen bildirimler UI thread'ine yönlendirilir.
         /// </summary>
-        private void ShowBalloon(int timeoutMs, string text, ToolTipIcon icon)
+        private void ShowBalloon(int timeoutMs, string text, ToolTipIcon icon, bool isUpdate = false)
         {
             _app.Dispatcher.BeginInvoke(new Action(() =>
             {
                 try
                 {
+                    _lastBalloonIsUpdate = isUpdate;
                     if (_trayIcon.Visible)
                         _trayIcon.ShowBalloonTip(timeoutMs, "Warden", text, icon);
                 }
@@ -736,6 +886,7 @@ namespace Warden
             void Safe(Action a) { try { a(); } catch (Exception ex) { Log($"[Exit] {ex.Message}"); } }
 
             Safe(() => _deviceEnforceTimer?.Dispose());
+            Safe(() => _updateTimer?.Dispose());
             Safe(() => _watcher?.Stop());
             Safe(() => _gpuMonitor?.Stop());
             Safe(() => _app.Dispatcher.Invoke(() =>

@@ -14,6 +14,7 @@ namespace Warden
         public Dictionary<string, string> Rules { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string Language { get; set; } = "TR";
         public bool StartWithWindows { get; set; } = false;
+        public bool AutoCheckUpdates { get; set; } = true;
         public List<string> DiscoveredGames { get; set; } = new();
         public Dictionary<string, string> DiscoveredGameNames { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 

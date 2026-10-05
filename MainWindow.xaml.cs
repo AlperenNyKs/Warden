@@ -261,6 +261,7 @@ namespace Warden
             {
                 txtInterval.Text   = _context.Config.CheckIntervalMilliseconds.ToString();
                 chkStartup.IsChecked = _context.Config.StartWithWindows;
+                chkAutoUpdate.IsChecked = _context.Config.AutoCheckUpdates;
 
                 foreach (ComboBoxItem item in cbLanguage.Items)
                 {
@@ -699,6 +700,7 @@ namespace Warden
             txtInterval.Text = _context.Config.CheckIntervalMilliseconds.ToString();
 
             _context.Config.StartWithWindows = chkStartup.IsChecked == true;
+            _context.Config.AutoCheckUpdates = chkAutoUpdate.IsChecked == true;
 
             if (cbLanguage.SelectedItem is ComboBoxItem langItem)
                 _context.Config.Language = langItem.Tag?.ToString() ?? "TR";
@@ -904,6 +906,77 @@ namespace Warden
         }
 
         // ══════════════════════════════════════════════════════════════
+        //  Updates
+        // ══════════════════════════════════════════════════════════════
+        private bool _updateBusy;
+
+        /// <summary>Kontrol sonucunu ayarlar sayfasında gösterir. null = kontrol sürüyor.</summary>
+        public void ShowUpdateStatus(UpdateCheckResult? result, bool fromLanguageChange = false)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => ShowUpdateStatus(result, fromLanguageChange)));
+                return;
+            }
+            if (_updateBusy && fromLanguageChange) return;   // indirme mesajını dil değişimi ezmesin
+
+            var pending = _context.PendingUpdate;
+            btnInstallUpdate.Visibility = pending != null ? Visibility.Visible : Visibility.Collapsed;
+            if (pending != null) lblInstallUpdate.Text = Loc.Format("BtnInstallUpdate", pending.Tag);
+
+            if (result == null)
+            {
+                txtUpdateStatus.Text = fromLanguageChange ? "" : Loc.Get("UpdateChecking");
+                txtUpdateStatus.Foreground = (Brush)FindResource("TxtSecond");
+                return;
+            }
+
+            (string text, string brushKey) = result.Status switch
+            {
+                UpdateCheckStatus.UpdateAvailable when result.Update != null =>
+                    (Loc.Format("UpdateAvailable", result.Update.Tag), "Accent"),
+                UpdateCheckStatus.UpToDate => (Loc.Get("UpdateUpToDate"), "TxtSecond"),
+                UpdateCheckStatus.Unavailable => (Loc.Get("UpdateUnavailable"), "TxtSecond"),
+                _ => (Loc.Format("UpdateError", result.Message), "Red")
+            };
+            txtUpdateStatus.Text = text;
+            txtUpdateStatus.Foreground = (Brush)FindResource(brushKey);
+        }
+
+        /// <summary>İndirme/kurulum ilerlemesini gösterir; busy iken butonlar kilitlenir.</summary>
+        public void ShowUpdateMessage(string message, bool busy)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => ShowUpdateMessage(message, busy)));
+                return;
+            }
+            _updateBusy = busy;
+            txtUpdateStatus.Text = message;
+            txtUpdateStatus.Foreground = (Brush)FindResource(busy ? "Accent" : "TxtSecond");
+            btnCheckUpdates.IsEnabled = !busy;
+            btnInstallUpdate.IsEnabled = !busy;
+        }
+
+        private async void BtnCheckUpdates_Click(object sender, RoutedEventArgs e)
+        {
+            btnCheckUpdates.IsEnabled = false;
+            try
+            {
+                await _context.CheckForUpdatesAsync(manual: true);
+            }
+            finally
+            {
+                if (!_updateBusy) btnCheckUpdates.IsEnabled = true;
+            }
+        }
+
+        private async void BtnInstallUpdate_Click(object sender, RoutedEventArgs e)
+        {
+            await _context.ConfirmAndInstallUpdateAsync();
+        }
+
+        // ══════════════════════════════════════════════════════════════
         //  GPU UI Events
         // ══════════════════════════════════════════════════════════════
         private void GpuSetting_Changed(object sender, RoutedEventArgs e)
@@ -1002,6 +1075,12 @@ namespace Warden
             lblScanInterval.Text        = Loc.Get("ScanInterval");
             lblScanIntervalDesc.Text    = Loc.Get("ScanIntervalDesc");
             lblSaveBtn.Text             = Loc.Get("BtnSaveSettings");
+            lblUpdatesSection.Text      = Loc.Get("UpdatesSection");
+            lblUpdateAutoCheck.Text     = Loc.Get("UpdateAutoCheck");
+            lblUpdateAutoCheckDesc.Text = Loc.Get("UpdateAutoCheckDesc");
+            lblCheckUpdates.Text        = Loc.Get("BtnCheckUpdates");
+            txtCurrentVersion.Text      = Loc.Format("UpdateCurrentVersion", UpdateService.CurrentVersion.ToString(3));
+            ShowUpdateStatus(_context.LastUpdateResult, fromLanguageChange: true);
 
             // Telemetry
             lblTelemetryHeader.Text     = Loc.Get("TelemetryHeader");

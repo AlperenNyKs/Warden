@@ -77,6 +77,8 @@ Name: "{autodesktop}\Warden"; Filename: "{app}\Warden.exe"; Tasks: desktopicon
 [Run]
 ; Warden requireAdministrator manifestli: kurulumun yönetici token'ıyla başlatılır (ikinci UAC sorusu çıkmaz)
 Filename: "{app}\Warden.exe"; Description: "{cm:LaunchProgram,Warden}"; Flags: nowait postinstall skipifsilent runascurrentuser
+; Uygulama içinden güncelleme (/SILENT): kurulum bitince Warden kendiliğinden yeniden açılır
+Filename: "{app}\Warden.exe"; Flags: nowait runascurrentuser; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM Warden.exe /F"; Flags: runhidden; RunOnceId: "KillWarden"
