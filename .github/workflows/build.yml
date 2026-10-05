@@ -3,8 +3,12 @@ name: Build
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
+
+permissions:
+  contents: write   # v* etiketinde GitHub Release oluşturmak için
 
 jobs:
   build:
@@ -27,12 +31,50 @@ jobs:
       - name: Test
         run: dotnet test Tests/Warden.Tests/Warden.Tests.csproj -c Release --logger "console;verbosity=normal"
 
-      - name: Publish
-        run: dotnet publish -c Release --no-build -o publish
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          [xml]$proj = Get-Content Warden.csproj
+          $base = ([string]$proj.Project.PropertyGroup.Version).Trim()
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart('v')
+          } else {
+            $version = "$base-ci.${{ github.run_number }}"
+          }
+          $parts = ($version -split '-')[0].Split('.')
+          while ($parts.Count -lt 4) { $parts += '0' }
+          $numeric = ($parts[0..3] -join '.')
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "numeric=$numeric" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version ($numeric)"
 
-      - name: Upload build
+      # Self-contained: hedef bilgisayarda .NET 10 Desktop Runtime kurulu olması gerekmez
+      - name: Publish (self-contained win-x64)
+        run: dotnet publish Warden.csproj -c Release -r win-x64 --self-contained true -p:Version=${{ steps.ver.outputs.version }} -o publish
+
+      - name: Install / update Inno Setup
+        run: choco upgrade innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" "/DAppNumericVersion=${{ steps.ver.outputs.numeric }}" installer\Warden.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Warden-${{ github.sha }}
-          path: publish/
-          retention-days: 14
+          name: Warden-Setup-${{ steps.ver.outputs.version }}
+          path: installer-output/*.exe
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" (Get-ChildItem installer-output\*.exe).FullName `
+            --title "Warden ${{ steps.ver.outputs.version }}" --generate-notes
