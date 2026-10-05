@@ -975,6 +975,7 @@ namespace Warden
             lblLiveGraphTitle.Text      = Loc.Get("LiveGraphTitle");
             txtNoGraphHint.Text         = Loc.Get("NoGraphSensorsHint");
             lblGraphNow.Text            = Loc.Get("GraphNow");
+            runPawnIoHint.Text          = Loc.Get("PawnIoMissing") + " ";
 
             foreach (ComboBoxItem item in cbTargetProfile.Items)
                 item.Content = Loc.Format("ProfileN", item.Tag);
@@ -992,9 +993,27 @@ namespace Warden
             if (!_telemetryInitialized)
             {
                 _telemetryInitialized = true;
+                pnlPawnIoHint.Visibility = HardwareMonitorService.IsPawnIoInstalled ? Visibility.Collapsed : Visibility.Visible;
                 _hardwareMonitor.Initialize(_context.Config.TelemetryFavorites, _context.Config.TelemetryGraphSensors);
             }
             _hardwareMonitor.Start(1000);
+        }
+
+        private void LnkPawnIo_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+        {
+            // Warden yönetici olarak çalışır; tarayıcıyı doğrudan başlatmak onu da yönetici yapar.
+            // explorer.exe isteği mevcut (yükseltilmemiş) kabuğa devreder.
+            try
+            {
+                using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{e.Uri.AbsoluteUri}\"",
+                    UseShellExecute = false
+                });
+            }
+            catch { }
+            e.Handled = true;
         }
 
         private void StopTelemetry()

@@ -1019,6 +1019,19 @@
                                                    FontSize="12" Margin="0,4,0,0"/>
                                     </StackPanel>
 
+                                    <!-- 0. PawnIO uyarısı: LibreHardwareMonitor 0.9.6+ CPU/MSR sensörleri için PawnIO sürücüsü ister -->
+                                    <Border x:Name="pnlPawnIoHint" Background="{StaticResource AccentRedDim}"
+                                            CornerRadius="10" Padding="16,12" Margin="0,0,0,14"
+                                            BorderBrush="{StaticResource AccentRed}" BorderThickness="1"
+                                            Visibility="Collapsed">
+                                        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TxtPrimary}">
+                                            <Run x:Name="runPawnIoHint" Text="PawnIO sürücüsü kurulu değil."/>
+                                            <Hyperlink x:Name="lnkPawnIo" NavigateUri="https://pawnio.eu/"
+                                                       RequestNavigate="LnkPawnIo_RequestNavigate"
+                                                       Foreground="{StaticResource Accent}">pawnio.eu</Hyperlink>
+                                        </TextBlock>
+                                    </Border>
+
                                     <!-- 1. ⭐ FAVORİLER (Pinned Quick Cards) -->
                                     <Border x:Name="pnlFavoritesContainer" Background="{StaticResource BgCard}"
                                             CornerRadius="10" Padding="16,14" Margin="0,0,0,14"

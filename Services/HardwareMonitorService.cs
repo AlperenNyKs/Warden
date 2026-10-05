@@ -92,6 +92,20 @@ namespace Warden
 
         public event EventHandler<TelemetrySnapshot>? TelemetryUpdated;
 
+        /// <summary>
+        /// LibreHardwareMonitor 0.9.6+ eski WinRing0 yerine PawnIO sürücüsünü kullanır (WinRing0'ı Defender
+        /// "vulnerable driver" olarak engelliyor). PawnIO kurulu değilse CPU sıcaklık/saat/güç gibi MSR
+        /// tabanlı sensörler boş gelir; arayüz bunu kullanıcıya göstermek için bu bilgiyi kullanır.
+        /// </summary>
+        public static bool IsPawnIoInstalled
+        {
+            get
+            {
+                try { return LibreHardwareMonitor.PawnIo.PawnIo.IsInstalled; }
+                catch { return false; }
+            }
+        }
+
         private static readonly object LogLock = new();
 
         private static void LogTelemetry(string message)
