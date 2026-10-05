@@ -227,6 +227,88 @@ namespace Warden
         /// <summary>İlk açılışta tepsi çağırır: durum sayfasını göster.</summary>
         public void ShowStatusPage() => ShowPage("status");
 
+        // ══════════════════════════════════════════════════════════════
+        //  Modules
+        // ══════════════════════════════════════════════════════════════
+
+        // Sayfa → onu kontrol eden modül (null: her zaman açık sayfa)
+        private static string? ModuleOfPage(string page) => page switch
+        {
+            "profiles"  => "sonar",
+            "devices"   => "devices",
+            "gpu"       => "gpu",
+            "telemetry" => "hardware",
+            _           => null
+        };
+
+        private bool IsModuleOn(string module) => module switch
+        {
+            "sonar"    => _context.Config.ModuleSonar,
+            "devices"  => _context.Config.ModuleAudioDevices,
+            "hardware" => _context.Config.ModuleHardware,
+            "gpu"      => _context.Config.GpuProfileActive,
+            _          => true
+        };
+
+        /// <summary>Kapalı modüllerin menü düğmesini ve sayfasını soluklaştırır; açık sayfa kapalıysa kartı gösterir.</summary>
+        private void ApplyModuleState()
+        {
+            var modulePages = new (Button Nav, FrameworkElement Page, string Module)[]
+            {
+                (btnNavHome,      pageProfiles,      "sonar"),
+                (btnNavDevice,    pageDeviceManager, "devices"),
+                (btnNavGpu,       pageGpuMonitor,    "gpu"),
+                (btnNavTelemetry, pageTelemetry,     "hardware"),
+            };
+            foreach (var (nav, page, module) in modulePages)
+            {
+                bool on = IsModuleOn(module);
+                nav.Opacity = on ? 1 : 0.45;
+                page.IsEnabled = on;
+                page.Opacity = on ? 1 : 0.35;
+            }
+
+            string? current = ModuleOfPage(_currentPage);
+            if (current != null && !IsModuleOn(current))
+            {
+                txtModuleOffDesc.Text = current == "gpu" && !_context.Config.ModuleHardware
+                    ? Loc.Get("ModuleGpuNeedsHardware")
+                    : Loc.Get("ModuleOffDesc");
+                moduleOffOverlay.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                moduleOffOverlay.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void BtnModuleEnable_Click(object sender, RoutedEventArgs e)
+        {
+            var cfg = _context.Config;
+            switch (ModuleOfPage(_currentPage))
+            {
+                case "sonar":    cfg.ModuleSonar = true; break;
+                case "devices":  cfg.ModuleAudioDevices = true; break;
+                case "hardware": cfg.ModuleHardware = true; break;
+                case "gpu":      cfg.ModuleGpuProfile = true; cfg.ModuleHardware = true; break;
+                default: return;
+            }
+            _context.SaveConfig();
+            _context.ReloadConfig();
+            LoadInitialConfig();   // ayarlar sayfasındaki modül kutularını güncelle
+            if (cfg.ModuleSonar) RefreshPresetsIfNeeded();
+            ShowPage(_currentPage);
+        }
+
+        /// <summary>Sonar modülü kapalıyken bağlantı göstergesi; açılınca preset listesi yeniden yüklensin.</summary>
+        private void ShowSonarModuleOff()
+        {
+            txtConnectionStatus.Text = Loc.Get("SonarModuleOff");
+            SetSonarIndicator(Color.FromRgb(120, 120, 160));
+            _sonarConnected = false;
+            _presetsLoaded = false;
+        }
+
         /// <summary>Oyun taraması bildirimine tıklanınca tepsi çağırır.</summary>
         public void ShowProfilesPage() => ShowPage("profiles");
 
@@ -267,6 +349,7 @@ namespace Warden
                 nav.Foreground = (Brush)FindResource(active ? "Accent" : "TxtSecond");
                 nav.Background = active ? (Brush)FindResource("NavActiveBg") : Brushes.Transparent;
             }
+            ApplyModuleState();
 
             if (page == "overview")
             {
@@ -291,6 +374,10 @@ namespace Warden
                 chkAutoUpdate.IsChecked = _context.Config.AutoCheckUpdates;
                 chkAutoScan.IsChecked = _context.Config.AutoScanGames;
                 chkAutoAssign.IsChecked = _context.Config.AutoAssignGgPresets;
+                chkModuleSonar.IsChecked = _context.Config.ModuleSonar;
+                chkModuleAudioDevices.IsChecked = _context.Config.ModuleAudioDevices;
+                chkModuleHardware.IsChecked = _context.Config.ModuleHardware;
+                chkModuleGpuProfile.IsChecked = _context.Config.ModuleGpuProfile;
                 chkTempAlarm.IsChecked = _context.Config.TempAlarmEnabled;
                 txtCpuTempLimit.Text = _context.Config.CpuTempLimit.ToString();
                 txtGpuTempLimit.Text = _context.Config.GpuTempLimit.ToString();
@@ -334,6 +421,11 @@ namespace Warden
         private async Task LoadSonarPresetsAsync()
         {
             if (_isLoadingPresets) return;
+            if (!_context.Config.ModuleSonar)
+            {
+                ShowSonarModuleOff();
+                return;
+            }
             _isLoadingPresets = true;
 
             txtConnectionStatus.Text = Loc.Get("Connecting");
@@ -727,6 +819,10 @@ namespace Warden
             _context.Config.AutoCheckUpdates = chkAutoUpdate.IsChecked == true;
             _context.Config.AutoScanGames = chkAutoScan.IsChecked == true;
             _context.Config.AutoAssignGgPresets = chkAutoAssign.IsChecked == true;
+            _context.Config.ModuleSonar = chkModuleSonar.IsChecked == true;
+            _context.Config.ModuleAudioDevices = chkModuleAudioDevices.IsChecked == true;
+            _context.Config.ModuleHardware = chkModuleHardware.IsChecked == true;
+            _context.Config.ModuleGpuProfile = chkModuleGpuProfile.IsChecked == true;
             _context.Config.TempAlarmEnabled = chkTempAlarm.IsChecked == true;
             ApplyTempLimitsFromUi();
 
@@ -735,6 +831,10 @@ namespace Warden
 
             _context.SaveConfig();
             _context.ReloadConfig();
+
+            if (_context.Config.ModuleSonar) RefreshPresetsIfNeeded();
+            else ShowSonarModuleOff();
+            ApplyModuleState();
         }
 
         private void Setting_Changed(object sender, RoutedEventArgs e) 
@@ -1256,11 +1356,22 @@ namespace Warden
                     : new StatusCheck(CheckState.Ok, Loc.Get("StatusInstall"), Loc.Format("StatusInstallOk",
                         System.IO.Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "")));
 
-                // SteelSeries GG + Sonar
-                bool ggInstalled;
-                try { _client.GetCorePropsPath(); ggInstalled = true; } catch { ggInstalled = false; }
+                // Kapalı modüllerin bağımlılıkları "eksik" diye uyarılmaz (ve GG'ye bağlanılmaz)
+                var cfg = _context.Config;
+                string moduleOff = Loc.Get("StatusModuleOff");
 
-                if (!ggInstalled)
+                // SteelSeries GG + Sonar
+                bool ggInstalled = false;
+                if (cfg.ModuleSonar)
+                {
+                    try { _client.GetCorePropsPath(); ggInstalled = true; } catch { ggInstalled = false; }
+                }
+
+                if (!cfg.ModuleSonar)
+                {
+                    checks.Add(new StatusCheck(CheckState.Ok, "SteelSeries GG", moduleOff));
+                }
+                else if (!ggInstalled)
                 {
                     checks.Add(new StatusCheck(CheckState.Warning, "SteelSeries GG", Loc.Get("StatusGgMissing"),
                                                Loc.Get("StatusDownload"), "https://steelseries.com/gg"));
@@ -1283,25 +1394,35 @@ namespace Warden
                 }
 
                 // MSI Afterburner
-                string? afterburner = await Task.Run(() => _context.AfterburnerPath);
-                checks.Add(afterburner != null
+                string? afterburner = cfg.GpuProfileActive ? await Task.Run(() => _context.AfterburnerPath) : null;
+                checks.Add(!cfg.GpuProfileActive
+                    ? new StatusCheck(CheckState.Ok, "MSI Afterburner", moduleOff)
+                    : afterburner != null
                     ? new StatusCheck(CheckState.Ok, "MSI Afterburner", afterburner)
                     : new StatusCheck(CheckState.Warning, "MSI Afterburner", Loc.Get("StatusAfterburnerMissing"),
                                       Loc.Get("StatusDownload"), "https://www.msi.com/Landing/afterburner/graphics-cards"));
 
-                // PawnIO
-                checks.Add(HardwareMonitorService.IsPawnIoInstalled
-                    ? new StatusCheck(CheckState.Ok, "PawnIO", Loc.Get("StatusPawnIoOk"))
-                    : new StatusCheck(CheckState.Warning, "PawnIO", Loc.Get("StatusPawnIoMissing"),
-                                      Loc.Get("StatusDownload"), "https://pawnio.eu/"));
+                if (!cfg.ModuleHardware)
+                {
+                    // Sensörler çalışmıyor: PawnIO / GPU kontrolü (ve 10 sn bekleme) gereksiz
+                    checks.Add(new StatusCheck(CheckState.Ok, Loc.Get("StatusGpu"), moduleOff));
+                }
+                else
+                {
+                    // PawnIO
+                    checks.Add(HardwareMonitorService.IsPawnIoInstalled
+                        ? new StatusCheck(CheckState.Ok, "PawnIO", Loc.Get("StatusPawnIoOk"))
+                        : new StatusCheck(CheckState.Warning, "PawnIO", Loc.Get("StatusPawnIoMissing"),
+                                          Loc.Get("StatusDownload"), "https://pawnio.eu/"));
 
-                // GPU (telemetri bu sayfa açıkken çalışır; ilk tarama birkaç saniye sürebilir)
-                for (int i = 0; i < 40 && _context.LastSnapshot?.HardwareReady != true; i++)
-                    await Task.Delay(250);
-                var gpu = _context.LastSnapshot?.PrimaryGpu;
-                checks.Add(gpu != null
-                    ? new StatusCheck(CheckState.Ok, Loc.Get("StatusGpu"), $"{gpu.Vendor} · {gpu.Name}")
-                    : new StatusCheck(CheckState.Warning, Loc.Get("StatusGpu"), Loc.Get("StatusGpuMissing")));
+                    // GPU (telemetri bu sayfa açıkken çalışır; ilk tarama birkaç saniye sürebilir)
+                    for (int i = 0; i < 40 && _context.LastSnapshot?.HardwareReady != true; i++)
+                        await Task.Delay(250);
+                    var gpu = _context.LastSnapshot?.PrimaryGpu;
+                    checks.Add(gpu != null
+                        ? new StatusCheck(CheckState.Ok, Loc.Get("StatusGpu"), $"{gpu.Vendor} · {gpu.Name}")
+                        : new StatusCheck(CheckState.Warning, Loc.Get("StatusGpu"), Loc.Get("StatusGpuMissing")));
+                }
 
                 // Güncelleme
                 var update = _context.LastUpdateResult;
@@ -1636,6 +1757,17 @@ namespace Warden
             lblAutoScanDesc.Text        = Loc.Get("AutoScanDesc");
             lblAutoAssign.Text          = Loc.Get("AutoAssign");
             lblAutoAssignDesc.Text      = Loc.Get("AutoAssignDesc");
+            lblModulesSection.Text      = Loc.Get("ModulesSection");
+            lblModuleSonar.Text         = Loc.Get("ModuleSonar");
+            lblModuleSonarDesc.Text     = Loc.Get("ModuleSonarDesc");
+            lblModuleAudioDevices.Text     = Loc.Get("ModuleAudioDevices");
+            lblModuleAudioDevicesDesc.Text = Loc.Get("ModuleAudioDevicesDesc");
+            lblModuleHardware.Text      = Loc.Get("ModuleHardware");
+            lblModuleHardwareDesc.Text  = Loc.Get("ModuleHardwareDesc");
+            lblModuleGpuProfile.Text     = Loc.Get("ModuleGpuProfile");
+            lblModuleGpuProfileDesc.Text = Loc.Get("ModuleGpuProfileDesc");
+            txtModuleOffTitle.Text      = Loc.Get("ModuleOffTitle");
+            lblModuleEnable.Text        = Loc.Get("ModuleEnable");
             lblCheckUpdates.Text        = Loc.Get("BtnCheckUpdates");
             txtCurrentVersion.Text      = Loc.Format("UpdateCurrentVersion", UpdateService.CurrentVersion.ToString(3));
             ShowUpdateStatus(_context.LastUpdateResult, fromLanguageChange: true);

@@ -94,6 +94,7 @@ namespace Warden
         private readonly object _hwLock = new();
         private int _isUpdating = 0;
         private bool _isInitialized = false;
+        private int _openGeneration;   // Release() artırır: arka planda süren açılış sonradan bırakılır
 
         private readonly Dictionary<string, TelemetrySensorItem> _sensors = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _favoriteIds = new(StringComparer.OrdinalIgnoreCase);
@@ -184,6 +185,7 @@ namespace Warden
                 if (_computer == null && !_isInitializingComputer)
                 {
                     _isInitializingComputer = true;
+                    int generation = _openGeneration;
                     Task.Run(() =>
                     {
                         try
@@ -202,7 +204,7 @@ namespace Warden
                             lock (_hwLock)
                             lock (_lock)
                             {
-                                if (_disposed)
+                                if (_disposed || generation != _openGeneration)
                                 {
                                     comp.Close();
                                     return;
@@ -251,6 +253,29 @@ namespace Warden
                 _timer?.Dispose();
                 _timer = null;
             }
+        }
+
+        /// <summary>
+        /// Durdurur ve LibreHardwareMonitor'u (çekirdek sürücüsüyle birlikte) kapatır. Donanım izleme modülü
+        /// kapatılınca çağrılır; sonraki Initialize yeniden açar.
+        /// </summary>
+        public void Release()
+        {
+            Stop();
+            lock (_hwLock)
+            {
+                Computer? computer;
+                lock (_lock)
+                {
+                    computer = _computer;
+                    _computer = null;
+                    _isInitialized = false;
+                    _openGeneration++;
+                }
+                try { computer?.Close(); }
+                catch { }
+            }
+            LogTelemetry("LibreHardwareMonitor released (hardware module off).");
         }
 
         public bool ToggleFavorite(string sensorId)

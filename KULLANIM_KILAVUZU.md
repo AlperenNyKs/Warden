@@ -63,7 +63,13 @@ dotnet run -c Release
    - İstemediğiniz sanal veya hayalet ses aygıtlarını arka planda otomatik devre dışı bırakır.
 
 7. **Sistem Durumu (Durum):**
-   - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir.
+   - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir. Kapalı modüllerin bağımlılıkları "Modül kapalı" olarak gösterilir.
 
-8. **Kapatma:**
+8. **Modüller (Ayarlar → Modüller):**
+   - Kullanmadığınız özellikleri kapatabilirsiniz: **Sonar profil geçişi**, **Ses cihazı denetleyicisi**, **Donanım izleme** (sensörler, sıcaklık alarmı, CSV kaydı) ve **GPU / Afterburner profili**.
+   - Kapalı modül arka planda hiç çalışmaz: Sonar kapalıyken GG'ye bağlanılmaz, donanım izleme kapalıyken sensör sürücüsü yüklenmez. Sayfası menüde soluk görünür; açmak için sayfadaki **"Modülü aç"** butonunu kullanabilirsiniz.
+   - Sonar kapalıyken de oyun takibi sürer: Panel'deki aktif oyun ve oyun açılınca otomatik CSV kaydı çalışmaya devam eder.
+   - GPU profili saat hızını sensörlerden okuduğu için donanım izleme açık olmalıdır.
+
+9. **Kapatma:**
    - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Çıkış"** (İngilizcede "Exit") diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.

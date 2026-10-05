@@ -132,6 +132,17 @@ namespace Warden
             _onLog("Config hot-reloaded (watcher devam ediyor).");
         }
 
+        // Sonar modülü kapalıyken oyun takibi (oturum, CSV kaydı) sürer ama GG'ye hiç istek gönderilmez
+        private volatile bool _switchingEnabled = true;
+
+        public void SetSwitchingEnabled(bool enabled)
+        {
+            if (_switchingEnabled == enabled) return;
+            _switchingEnabled = enabled;
+            if (enabled) Interlocked.Exchange(ref _forceReapply, 1);   // kapalıyken GG'de profil değişmiş olabilir
+            _onLog(enabled ? "Sonar switching enabled." : "Sonar switching disabled (module off).");
+        }
+
         // Sonar yeniden başlayınca aktif preset sıfırlanabilir; "zaten uygulandı" durumu geçersizdir
         private int _forceReapply = 0;
 
@@ -245,6 +256,7 @@ namespace Warden
                 }
 
                 // 3. Gerekiyorsa preset'i değiştir
+                if (!_switchingEnabled) return;
                 if (string.IsNullOrWhiteSpace(targetPresetId)) return;   // Hedef tanımlı değil (ör. varsayılan seçilmemiş)
                 if (_currentPresetId == targetPresetId) return;
 

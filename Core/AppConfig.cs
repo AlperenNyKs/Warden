@@ -9,6 +9,17 @@ namespace Warden
         public const int MinCheckIntervalMs = 250;
         public const int MaxCheckIntervalMs = 60000;
 
+        // Modüller: kapalı modül yalnızca gizlenmez, arka planda da hiç çalışmaz.
+        // Eski config'lerde alan yok → varsayılan açık (güncelleme davranışı değiştirmez).
+        public bool ModuleSonar { get; set; } = true;        // GG/Sonar profil geçişi
+        public bool ModuleAudioDevices { get; set; } = true; // ses cihazı denetleyicisi
+        public bool ModuleHardware { get; set; } = true;     // sensörler, sıcaklık alarmı, CSV kaydı
+        public bool ModuleGpuProfile { get; set; } = true;   // Afterburner profil geçişi (ModuleHardware gerekir)
+
+        /// <summary>GPU profili sensörlerden saat hızını okur; donanım izleme kapalıysa çalışamaz.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool GpuProfileActive =>ModuleGpuProfile && ModuleHardware;
+
         public int CheckIntervalMilliseconds { get; set; } = 1000;
         public string DefaultPresetId { get; set; } = "";
         public Dictionary<string, string> Rules { get; set; } = new(StringComparer.OrdinalIgnoreCase);
