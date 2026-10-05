@@ -523,7 +523,7 @@ namespace Warden
         private static readonly HashSet<string> SystemExeTokens = new(StringComparer.OrdinalIgnoreCase)
         {
             "update", "patch", "report", "reporter", "support", "tool", "tools", "config",
-            "uninstall", "debug", "compiler", "server", "editor", "sdk", "devkit", "mod", "mods",
+            "uninstall", "debug", "diag", "compiler", "server", "editor", "sdk", "devkit", "mod", "mods",
             "cef", "qt5", "qt6", "xna", "eac", "msvc", "msvcp", "msvcr", "vcredist",
             "steamwebhelper", "galaxyclient", "eadesktop", "ubisoftconnect", "epicgames", "epicgameslauncher",
             "python", "pythonw", "java", "javaw", "jre", "jdk",

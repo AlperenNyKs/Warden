@@ -101,5 +101,65 @@ namespace Warden.Tests
             Assert.Equal(300, cfg.DeviceDisableDelaySeconds);
             Assert.Equal(0.0, cfg.TargetMhz);
         }
+
+        private static AppConfig ConfigWith(params (string Exe, string Name, string? Preset)[] games)
+        {
+            var cfg = new AppConfig();
+            foreach (var (exe, name, preset) in games)
+            {
+                cfg.DiscoveredGames.Add(exe);
+                cfg.DiscoveredGameNames[exe] = name;
+                if (preset != null) cfg.Rules[exe] = preset;
+            }
+            return cfg;
+        }
+
+        [Fact]
+        public void Prune_RemovesUninstalledScannedGamesAndTheirRules()
+        {
+            var cfg = ConfigWith(("pubg.exe", "PUBG", "p1"), ("aces.exe", "War Thunder", "p2"));
+            cfg.ScannedGames = new() { "pubg.exe", "aces.exe" };
+
+            var removed = cfg.PruneUninstalledGames(new[] { "ACES.exe" });
+
+            Assert.Equal(new[] { "pubg.exe" }, removed);
+            Assert.Equal(new[] { "aces.exe" }, cfg.DiscoveredGames);
+            Assert.False(cfg.Rules.ContainsKey("pubg.exe"));
+            Assert.False(cfg.DiscoveredGameNames.ContainsKey("pubg.exe"));
+            Assert.True(cfg.Rules.ContainsKey("aces.exe"));
+        }
+
+        [Fact]
+        public void Prune_KeepsManuallyAddedGames()
+        {
+            var cfg = ConfigWith(("manual.exe", "My Game", "p1"), ("aces.exe", "War Thunder", null));
+            cfg.ScannedGames = new() { "aces.exe" };
+
+            Assert.Empty(cfg.PruneUninstalledGames(new[] { "aces.exe" }));
+            Assert.True(cfg.Rules.ContainsKey("manual.exe"));
+        }
+
+        [Fact]
+        public void Prune_LegacyConfigTreatsNamedEntriesAsScanned()
+        {
+            // Eski config: ScannedGames yok. Adı boş kayıt manuel/kural satırından eklenmiştir.
+            var cfg = ConfigWith(("pubg.exe", "PUBG", "p1"), ("noname.exe", "", "p2"));
+
+            var removed = cfg.PruneUninstalledGames(new[] { "aces.exe" });
+
+            Assert.Equal(new[] { "pubg.exe" }, removed);
+            Assert.True(cfg.Rules.ContainsKey("noname.exe"));
+            Assert.Equal(new[] { "aces.exe" }, cfg.ScannedGames);
+        }
+
+        [Fact]
+        public void Prune_EmptyScanRemovesNothing()
+        {
+            var cfg = ConfigWith(("pubg.exe", "PUBG", "p1"));
+            cfg.ScannedGames = new() { "pubg.exe" };
+
+            Assert.Empty(cfg.PruneUninstalledGames(Array.Empty<string>()));
+            Assert.True(cfg.Rules.ContainsKey("pubg.exe"));
+        }
     }
 }

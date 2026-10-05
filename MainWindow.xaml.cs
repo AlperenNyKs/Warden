@@ -670,6 +670,9 @@ namespace Warden
             {
                 var games = await Task.Run(GameScanner.ScanAllGames);
 
+                // Kaldırılmış oyunların listesi ve kuralları temizlenir
+                int removed = _context.Config.PruneUninstalledGames(games.Select(g => g.ExeName)).Count;
+
                 int added = 0;
                 foreach (var g in games)
                 {
@@ -683,11 +686,31 @@ namespace Warden
                         _context.Config.DiscoveredGameNames[g.ExeName] = g.GameName;
                     }
                 }
+
+                // GG'de birebir oyun profili olan oyunlara kural otomatik atanır; mevcut kurallara dokunulmaz.
+                // Preset listesi yüklenmediyse (GG kapalı) yalnızca oyunlar listeye eklenir.
+                int matched = 0;
+                if (_presetsLoaded)
+                {
+                    var unruled = games.Where(g => !string.IsNullOrEmpty(g.GameName) &&
+                                                   !_context.Config.Rules.ContainsKey(g.ExeName)).ToList();
+                    var matches = SonarPresetMatcher.MatchGames(unruled.Select(g => g.GameName), _availablePresets);
+                    foreach (var g in unruled)
+                    {
+                        if (!matches.TryGetValue(g.GameName, out var preset)) continue;
+                        _context.Config.Rules[g.ExeName] = preset.id;
+                        matched++;
+                    }
+                }
+
                 _context.SaveConfig();
+                if (matched > 0 || removed > 0) _context.ReloadConfig();
                 RenderRulesList();
 
                 // Sonuç, kimsenin görmediği sol alttaki küçük kutu yerine butonun üzerinde gösterilir
                 scanResult = added > 0 ? Loc.Format("ScanDone", added) : Loc.Get("ScanNone");
+                if (matched > 0) scanResult += " · " + Loc.Format("ScanMatched", matched);
+                if (removed > 0) scanResult += " · " + Loc.Format("ScanRemoved", removed);
             }
             catch (Exception ex)
             {
