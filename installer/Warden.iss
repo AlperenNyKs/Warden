@@ -65,6 +65,10 @@ Name: "pawnio"; Description: "{cm:InstallPawnIO}"; GroupDescription: "{cm:Driver
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Lisans yükümlülükleri: Warden + dağıtılan üçüncü taraf kütüphanelerin lisans metinleri
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Warden"; Filename: "{app}\Warden.exe"
@@ -73,6 +77,8 @@ Name: "{autodesktop}\Warden"; Filename: "{app}\Warden.exe"; Tasks: desktopicon
 [Run]
 ; Warden requireAdministrator manifestli: kurulumun yönetici token'ıyla başlatılır (ikinci UAC sorusu çıkmaz)
 Filename: "{app}\Warden.exe"; Description: "{cm:LaunchProgram,Warden}"; Flags: nowait postinstall skipifsilent runascurrentuser
+; Uygulama içinden güncelleme (/SILENT): kurulum bitince Warden kendiliğinden yeniden açılır
+Filename: "{app}\Warden.exe"; Flags: nowait runascurrentuser; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM Warden.exe /F"; Flags: runhidden; RunOnceId: "KillWarden"

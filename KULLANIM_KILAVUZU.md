@@ -8,7 +8,7 @@
 3. Kurulumda **"PawnIO sürücüsünü kur"** seçili kalsın (CPU sıcaklık/saat/güç sensörleri için gerekli).
 4. Bitince Warden tepside açılır. Açılışta başlasın istiyorsan **Ayarlar → Windows ile başlat**.
 
-- **Güncelleme:** Yeni sürümün setup'ını çalıştırman yeterli; ayarların korunur.
+- **Güncelleme:** Warden açılışta ve 6 saatte bir yeni sürüm var mı bakar; varsa bildirim gelir, tıklayınca indirip kurar ve kendini yeniden açar (Ayarlar → Güncellemeler'den elle de kontrol edebilirsin). İndirilen setup GitHub'daki SHA256 özetiyle doğrulanmadan çalıştırılmaz. Ayarların korunur.
 - **Kaldırma:** Ayarlar → Uygulamalar → Warden → Kaldır (açılış görevi de silinir).
 
 ## 📂 2. Dosya Konumları

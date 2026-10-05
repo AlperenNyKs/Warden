@@ -932,6 +932,7 @@
                             <Border Grid.Row="1" Background="{StaticResource BgCard}"
                                     CornerRadius="10" Padding="20"
                                     BorderBrush="{StaticResource Border}" BorderThickness="1">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel>
                                     <TextBlock x:Name="lblGeneralSection" Text="GENEL AYARLAR"
                                                Foreground="{StaticResource TxtSecond}"
@@ -997,7 +998,61 @@
                                                      LostFocus="TxtInterval_LostFocus"/>
                                         </Grid>
                                     </Border>
+
+                                    <!-- ── Güncellemeler ── -->
+                                    <TextBlock x:Name="lblUpdatesSection" Text="GÜNCELLEMELER"
+                                               Foreground="{StaticResource TxtSecond}"
+                                               FontSize="10" FontWeight="Bold" Margin="0,22,0,12"/>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblUpdateAutoCheck" Text="Güncellemeleri otomatik kontrol et"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblUpdateAutoCheckDesc"
+                                                           Text="Açılışta ve 6 saatte bir GitHub'daki sürümlere bakar."
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkAutoUpdate" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock x:Name="txtCurrentVersion" Text="Yüklü sürüm"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="txtUpdateStatus" Text=""
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11"
+                                                           TextWrapping="Wrap" Margin="0,2,12,0"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button x:Name="btnInstallUpdate" Style="{StaticResource AccentButton}"
+                                                        Padding="14,7" Margin="0,0,8,0" Visibility="Collapsed"
+                                                        Click="BtnInstallUpdate_Click">
+                                                    <TextBlock x:Name="lblInstallUpdate" Text="Kur"/>
+                                                </Button>
+                                                <Button x:Name="btnCheckUpdates" Style="{StaticResource FlatButton}"
+                                                        Padding="14,7" Click="BtnCheckUpdates_Click">
+                                                    <TextBlock x:Name="lblCheckUpdates" Text="Şimdi kontrol et"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
                                 </StackPanel>
+                                </ScrollViewer>
                             </Border>
 
                             <StackPanel Grid.Row="2" HorizontalAlignment="Right" Margin="0,14,0,0">
