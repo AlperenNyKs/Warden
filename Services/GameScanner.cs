@@ -55,7 +55,9 @@ namespace Warden
                 if (string.IsNullOrEmpty(steamPath)) return results;
 
                 // Read libraryfolders.vdf to get all library paths
-                var libFolders = new List<string> { Path.Combine(steamPath, "steamapps") };
+                // Registry'deki SteamPath "c:/program files (x86)/steam" gibi '/' ile yazılır, vdf'deki yollar '\' ile.
+                // Normalize edilmezse ana kütüphane listeye iki kez girip iki kez taranıyordu.
+                var libFolders = new List<string> { NormalizeDir(Path.Combine(steamPath, "steamapps")) };
                 string vdfPath = Path.Combine(steamPath, "config", "libraryfolders.vdf");
                 if (!File.Exists(vdfPath))
                     vdfPath = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
@@ -73,7 +75,7 @@ namespace Warden
                             if (parts.Length >= 4)
                             {
                                 string p = parts[3].Replace("\\\\", "\\");
-                                string steamapps = Path.Combine(p, "steamapps");
+                                string steamapps = NormalizeDir(Path.Combine(p, "steamapps"));
                                 if (Directory.Exists(steamapps) && !libFolders.Contains(steamapps, StringComparer.OrdinalIgnoreCase))
                                     libFolders.Add(steamapps);
                             }
@@ -442,6 +444,18 @@ namespace Warden
                 return Path.GetFileName(exes[0]);
             }
             catch { return null; }
+        }
+
+        private static string NormalizeDir(string path)
+        {
+            try
+            {
+                return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            }
+            catch
+            {
+                return path;
+            }
         }
 
         private static long SafeLength(string file)
