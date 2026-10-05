@@ -32,6 +32,19 @@ namespace Warden
         public List<string> TelemetryFavorites { get; set; } = new();
         public List<string> TelemetryGraphSensors { get; set; } = new();
 
+        // Sıcaklık alarmı (°C)
+        public const int MinTempLimit = 50;
+        public const int MaxTempLimit = 110;
+        public bool TempAlarmEnabled { get; set; } = true;
+        public int CpuTempLimit { get; set; } = 90;
+        public int GpuTempLimit { get; set; } = 85;
+
+        // Oyun kuralı aktifken telemetriyi CSV'ye otomatik kaydet
+        public bool AutoRecordGameSessions { get; set; } = false;
+
+        // İlk açılışta "Sistem Durumu" sayfası gösterildi mi
+        public bool FirstRunCompleted { get; set; } = false;
+
         // UI Settings (MainWindow.xaml varsayılanlarıyla aynı)
         public double WindowWidth { get; set; } = 940;
         public double WindowHeight { get; set; } = 640;
@@ -73,6 +86,8 @@ namespace Warden
             CooldownSeconds = Math.Max(1, CooldownSeconds);
             DeviceDisableDelaySeconds = Math.Clamp(DeviceDisableDelaySeconds, 0, 300);
             if (double.IsNaN(TargetMhz) || double.IsInfinity(TargetMhz) || TargetMhz < 0) TargetMhz = 0;
+            CpuTempLimit = Math.Clamp(CpuTempLimit, MinTempLimit, MaxTempLimit);
+            GpuTempLimit = Math.Clamp(GpuTempLimit, MinTempLimit, MaxTempLimit);
         }
     }
 }

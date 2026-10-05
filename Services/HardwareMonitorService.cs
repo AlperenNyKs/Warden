@@ -58,8 +58,25 @@ namespace Warden
         }
     }
 
+    /// <summary>Birincil ekran kartının özet değerleri (NVIDIA, AMD veya Intel).</summary>
+    public class GpuData
+    {
+        public string Name { get; set; } = "";
+        public string Vendor { get; set; } = "";
+        public double CoreClockMhz { get; set; }
+        public int TemperatureCelsius { get; set; }
+        public int UsagePercentage { get; set; }
+    }
+
     public class TelemetrySnapshot
     {
+        public DateTime Timestamp { get; set; } = DateTime.Now;
+        /// <summary>Birincil GPU; hiç GPU sensörü yoksa null.</summary>
+        public GpuData? PrimaryGpu { get; set; }
+        /// <summary>CPU paket/Tctl sıcaklığı (°C); okunamıyorsa null (ör. PawnIO kurulu değil).</summary>
+        public float? CpuTemperature { get; set; }
+        /// <summary>LibreHardwareMonitor açıldı ve en az bir tarama yapıldı.</summary>
+        public bool HardwareReady { get; set; }
         public List<TelemetrySensorItem> Favorites { get; set; } = new();
         public List<TelemetrySensorItem> GraphSensors { get; set; } = new();
         public Dictionary<string, List<TelemetrySensorItem>> Categories { get; set; } = new();
@@ -95,6 +112,15 @@ namespace Warden
         };
 
         public event EventHandler<TelemetrySnapshot>? TelemetryUpdated;
+
+        /// <summary>
+        /// true: tüm donanım taranır (telemetri sayfası açık veya kayıt sürüyor).
+        /// false: arka plan modu, yalnızca CPU ve GPU taranır (alarm / GPU profili için yeterli, daha hafif).
+        /// </summary>
+        public volatile bool FullScan = true;
+
+        private GpuData? _primaryGpu;
+        private int _intervalMs;
 
         /// <summary>
         /// LibreHardwareMonitor 0.9.6+ eski WinRing0 yerine PawnIO sürücüsünü kullanır (WinRing0'ı Defender
@@ -204,11 +230,15 @@ namespace Warden
 
         private int SensorCount { get { lock (_lock) return _sensors.Count; } }
 
+        public bool IsRunning { get { lock (_lock) return _timer != null; } }
+
         public void Start(int intervalMs = 1000)
         {
             lock (_lock)
             {
                 if (_disposed) return;
+                if (_timer != null && _intervalMs == intervalMs) return;   // zaten bu aralıkla çalışıyor
+                _intervalMs = intervalMs;
                 _timer?.Dispose();
                 _timer = new System.Threading.Timer(async _ => await TickAsync(), null, 0, intervalMs);
             }
@@ -348,20 +378,25 @@ namespace Warden
                         LogTelemetry("=============================================");
                     }
 
-                    // 1. Yavaş kısım: donanımdan oku (yalnızca _hwLock)
-                    foreach (var hardware in computer.Hardware)
+                    // 1. Yavaş kısım: donanımdan oku (yalnızca _hwLock). Arka plan modunda yalnızca CPU/GPU.
+                    bool full = FullScan;
+                    var scanned = computer.Hardware.Where(h => full || IsCpuOrGpu(h.HardwareType)).ToList();
+                    foreach (var hardware in scanned)
                     {
                         hardware.Update();
                         foreach (var sub in hardware.SubHardware)
                             sub.Update();
                     }
+                    GpuData? primaryGpu = ReadPrimaryGpu(scanned);
 
                     // 2. Hızlı kısım: okunan değerleri sözlüğe işle (kısa süreli _lock)
                     lock (_lock)
                     {
                         if (_disposed) return;
 
-                        foreach (var hardware in computer.Hardware)
+                        _primaryGpu = primaryGpu;
+
+                        foreach (var hardware in scanned)
                         {
                             ProcessHardwareSensors(hardware, hardware.Name);
                             foreach (var sub in hardware.SubHardware)
@@ -387,6 +422,44 @@ namespace Warden
                     LogTelemetry($"UpdateSensorsInternal error: {ex.Message}");
                 }
             }
+        }
+
+        private static bool IsCpuOrGpu(HardwareType type)
+            => type is HardwareType.Cpu or HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
+
+        /// <summary>
+        /// Birincil GPU: harici kartlar (NVIDIA, AMD) Intel'in önüne geçer. Tüm üreticilerde LibreHardwareMonitor
+        /// çekirdek sensörlerini "GPU Core" (sıcaklık / saat / yük) olarak adlandırır.
+        /// </summary>
+        private static GpuData? ReadPrimaryGpu(IEnumerable<IHardware> hardware)
+        {
+            var gpu = hardware
+                .Where(h => h.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel)
+                .OrderBy(h => h.HardwareType switch
+                {
+                    HardwareType.GpuNvidia => 0,
+                    HardwareType.GpuAmd => 1,
+                    _ => 2
+                })
+                .FirstOrDefault();
+            if (gpu == null) return null;
+
+            float? Read(SensorType type) => gpu.Sensors
+                .FirstOrDefault(s => s.SensorType == type && s.Name.Equals("GPU Core", StringComparison.OrdinalIgnoreCase))?.Value;
+
+            return new GpuData
+            {
+                Name = gpu.Name,
+                Vendor = gpu.HardwareType switch
+                {
+                    HardwareType.GpuNvidia => "NVIDIA",
+                    HardwareType.GpuAmd => "AMD",
+                    _ => "Intel"
+                },
+                CoreClockMhz = Read(SensorType.Clock) ?? 0,
+                TemperatureCelsius = (int)Math.Round(Read(SensorType.Temperature) ?? 0),
+                UsagePercentage = (int)Math.Round(Read(SensorType.Load) ?? 0)
+            };
         }
 
         private void ProcessHardwareSensors(IHardware hardware, string hardwareName)
@@ -751,8 +824,14 @@ namespace Warden
                     { "Memory", all.Where(s => s.Category == "Memory").ToList() }
                 };
 
+                var cpuTemp = _sensors.Values.FirstOrDefault(x => x.Category == "CPU" && x.SensorType == SensorType.Temperature);
+
                 snapshot = new TelemetrySnapshot
                 {
+                    Timestamp = DateTime.Now,
+                    PrimaryGpu = _primaryGpu,
+                    CpuTemperature = cpuTemp?.Value,
+                    HardwareReady = _isInitialized,
                     Favorites = favs,
                     GraphSensors = graphs,
                     Categories = cats,

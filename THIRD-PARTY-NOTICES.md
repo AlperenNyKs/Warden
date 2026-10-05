@@ -11,7 +11,6 @@ unmodified and as separate libraries (DLLs). Their full license texts are in the
 | RAMSPDToolkit-NDD | MPL-2.0 | Florian K. (Blacktempel) | https://github.com/Blacktempel/RAMSPDToolkit |
 | BlackSharp.Core | MPL-2.0 | Florian K. (Blacktempel) | https://github.com/Blacktempel/BlackSharp |
 | HidSharp | Apache-2.0 | James Bellinger | https://www.zer7.com/software/hidsharp |
-| NvAPIWrapper.Net | LGPL-3.0 | Soroush Falahati | https://github.com/falahati/NvAPIWrapper |
 | NAudio | MIT | Mark Heath and contributors | https://github.com/naudio/NAudio |
 | .NET runtime and libraries (self-contained build) | MIT | .NET Foundation and contributors | https://github.com/dotnet/runtime |
 | Mono.Posix.NETStandard | MIT | Mono Project / .NET Foundation | https://github.com/mono/mono |
@@ -21,9 +20,6 @@ unmodified and as separate libraries (DLLs). Their full license texts are in the
 - `licenses/MPL-2.0.txt` — Mozilla Public License 2.0. The source code of the MPL-licensed components is
   available at the URLs above.
 - `licenses/Apache-2.0.txt` — Apache License 2.0.
-- `licenses/LGPL-3.0.txt` and `licenses/GPL-3.0.txt` — GNU Lesser General Public License v3 (which
-  incorporates the GPL v3). NvAPIWrapper is used as an unmodified, separately loaded library
-  (`NvAPIWrapper.dll`); you may replace it with a compatible version built from its source.
 - `licenses/NAudio-MIT.txt` — MIT License (NAudio).
 
 ## Not bundled

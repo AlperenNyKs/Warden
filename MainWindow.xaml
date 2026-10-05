@@ -528,6 +528,17 @@
                                     <TextBlock Text="⚙" FontFamily="Segoe UI Emoji" FontSize="19"/>
                                 </Button>
                             </Grid>
+
+                            <!-- Nav: System Status -->
+                            <Grid Height="50" Margin="0,2">
+                                <Rectangle x:Name="rectStatusActive" Width="3" HorizontalAlignment="Left"
+                                           Fill="{StaticResource Accent}" RadiusX="2" RadiusY="2"
+                                           Visibility="Collapsed"/>
+                                <Button x:Name="btnNavStatus" Style="{StaticResource SidebarButton}"
+                                        Click="BtnNavStatus_Click" ToolTip="Sistem Durumu">
+                                    <TextBlock Text="🩺" FontFamily="Segoe UI Emoji" FontSize="19"/>
+                                </Button>
+                            </Grid>
                         </StackPanel>
 
                         <!-- Bottom Status Widget -->
@@ -771,9 +782,12 @@
                                 <TextBlock x:Name="lblGpuMonitorHeader" Text="GPU Monitör &amp; Otomatik Profil"
                                            Foreground="{StaticResource TxtPrimary}"
                                            FontSize="22" FontWeight="Bold"/>
-                                <TextBlock x:Name="lblGpuMonitorDesc" Text="NVIDIA GPU frekansını izler ve belirlenen limit aşıldığında Afterburner profilini tetikler."
+                                <TextBlock x:Name="lblGpuMonitorDesc" Text="Ekran kartı frekansını izler ve belirlenen limit aşıldığında Afterburner profilini tetikler."
                                            Foreground="{StaticResource TxtSecond}"
                                            FontSize="12" Margin="0,4,0,0"/>
+                                <TextBlock x:Name="txtGpuName" Text=""
+                                           Foreground="{StaticResource Accent}"
+                                           FontSize="12" FontWeight="SemiBold" Margin="0,6,0,0"/>
                             </StackPanel>
 
                             <!-- Stat Cards -->
@@ -913,6 +927,42 @@
                         <!-- ════════════════════════════════════════════════ -->
                         <!-- 4) SETTINGS PAGE                                -->
                         <!-- ════════════════════════════════════════════════ -->
+                        <!-- ════════════════════════════════════════════════ -->
+                        <!-- SYSTEM STATUS PAGE                                -->
+                        <!-- ════════════════════════════════════════════════ -->
+                        <Grid x:Name="pageStatus" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Margin="0,0,0,16">
+                                <TextBlock x:Name="lblStatusHeader" Text="Sistem Durumu"
+                                           Foreground="{StaticResource TxtPrimary}"
+                                           FontSize="22" FontWeight="Bold"/>
+                                <TextBlock x:Name="lblStatusDesc"
+                                           Text="Warden'ın ihtiyaç duyduğu programlar ve sürücüler. Eksik olan özellikler çalışmaz."
+                                           Foreground="{StaticResource TxtSecond}" TextWrapping="Wrap"
+                                           FontSize="12" Margin="0,4,0,0"/>
+                            </StackPanel>
+
+                            <Border Grid.Row="1" Background="{StaticResource BgCard}"
+                                    CornerRadius="10" Padding="20"
+                                    BorderBrush="{StaticResource Border}" BorderThickness="1">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel x:Name="spStatusChecks"/>
+                                </ScrollViewer>
+                            </Border>
+
+                            <StackPanel Grid.Row="2" HorizontalAlignment="Right" Margin="0,14,0,0">
+                                <Button x:Name="btnRecheckStatus" Style="{StaticResource AccentButton}"
+                                        Padding="22,9" Click="BtnRecheckStatus_Click">
+                                    <TextBlock x:Name="lblRecheckStatus" Text="Yeniden kontrol et"/>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
                         <Grid x:Name="pageSettings" Visibility="Collapsed">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -996,6 +1046,56 @@
                                             <TextBox x:Name="txtInterval" Grid.Column="1"
                                                      HorizontalContentAlignment="Center"
                                                      LostFocus="TxtInterval_LostFocus"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- ── Sıcaklık alarmı ── -->
+                                    <TextBlock x:Name="lblTempAlarmSection" Text="SICAKLIK ALARMI"
+                                               Foreground="{StaticResource TxtSecond}"
+                                               FontSize="10" FontWeight="Bold" Margin="0,22,0,12"/>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="lblTempAlarm" Text="Sıcaklık alarmı"
+                                                           Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="lblTempAlarmDesc"
+                                                           Text="Sıcaklık 10 saniye boyunca sınırın üstünde kalırsa bildirim gönderir."
+                                                           Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <CheckBox x:Name="chkTempAlarm" Grid.Column="1"
+                                                      Checked="Setting_Changed" Unchecked="Setting_Changed"
+                                                      VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgInput}" CornerRadius="8"
+                                            Padding="14,12" Margin="0,0,0,10" BorderThickness="0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="16"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="90"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="lblCpuTempLimit" Text="CPU sınırı (°C)"
+                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBox x:Name="txtCpuTempLimit" Grid.Column="1"
+                                                     HorizontalContentAlignment="Center"
+                                                     LostFocus="TxtTempLimit_LostFocus"/>
+                                            <TextBlock x:Name="lblGpuTempLimit" Grid.Column="3" Text="GPU sınırı (°C)"
+                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBox x:Name="txtGpuTempLimit" Grid.Column="4"
+                                                     HorizontalContentAlignment="Center"
+                                                     LostFocus="TxtTempLimit_LostFocus"/>
                                         </Grid>
                                     </Border>
 
@@ -1091,6 +1191,45 @@
                                                        RequestNavigate="LnkPawnIo_RequestNavigate"
                                                        Foreground="{StaticResource Accent}">pawnio.eu</Hyperlink>
                                         </TextBlock>
+                                    </Border>
+
+                                    <!-- Oturum kaydı (CSV) -->
+                                    <Border Background="{StaticResource BgCard}"
+                                            CornerRadius="10" Padding="16,12" Margin="0,0,0,14"
+                                            BorderBrush="{StaticResource BorderLight}" BorderThickness="1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Ellipse x:Name="dotRecording" Width="8" Height="8"
+                                                             Fill="{StaticResource TxtMuted}" Margin="0,0,8,0"
+                                                             VerticalAlignment="Center"/>
+                                                    <TextBlock x:Name="txtRecordingStatus" Text="Kayıt yok"
+                                                               Foreground="{StaticResource TxtPrimary}"
+                                                               FontWeight="SemiBold" FontSize="12"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                                <CheckBox x:Name="chkAutoRecord" Margin="0,8,0,0"
+                                                          Checked="ChkAutoRecord_Changed" Unchecked="ChkAutoRecord_Changed">
+                                                    <TextBlock x:Name="lblAutoRecord" Text="Kurallı bir oyun açılınca otomatik kaydet"
+                                                               Foreground="{StaticResource TxtSecond}" FontSize="11"
+                                                               TextWrapping="Wrap"/>
+                                                </CheckBox>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button x:Name="btnRecord" Style="{StaticResource AccentButton}"
+                                                        Padding="14,7" Margin="0,0,8,0" Click="BtnRecord_Click">
+                                                    <TextBlock x:Name="lblRecordBtn" Text="⏺ Kaydı başlat"/>
+                                                </Button>
+                                                <Button x:Name="btnOpenSessions" Style="{StaticResource FlatButton}"
+                                                        Padding="14,7" Click="BtnOpenSessions_Click">
+                                                    <TextBlock x:Name="lblOpenSessions" Text="📁 Kayıtlar"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
                                     </Border>
 
                                     <!-- 1. ⭐ FAVORİLER (Pinned Quick Cards) -->

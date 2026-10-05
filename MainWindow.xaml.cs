@@ -26,7 +26,7 @@ namespace Warden
         // ── State ──────────────────────────────────────────────────────
         private readonly SteelSeriesClient _client;
         private readonly TrayApplicationContext _context;
-        private readonly HardwareMonitorService _hardwareMonitor;
+        private HardwareMonitorService Telemetry => _context.Telemetry;
         private List<SonarConfig> _availablePresets = new();
         private string _currentPage = "profiles";
         private TelemetrySnapshot? _lastTelemetrySnapshot;
@@ -34,7 +34,6 @@ namespace Warden
         private readonly Dictionary<string, TextBlock> _favoriteValControls = new();
         private string _lastCategoryStructureKey = "";
         private string _lastFavoritesKey = "";
-        private bool _telemetryInitialized = false;
         private bool _isLoadingPresets = false;
         private bool _presetsLoaded = false;
         private bool _suppressPresetSave = false;
@@ -66,17 +65,13 @@ namespace Warden
             if (_context.Config.WindowHeight >= MinHeight) this.Height = _context.Config.WindowHeight;
             this.SizeChanged += MainWindow_SizeChanged;
 
-            // Hardware Monitor Service: LibreHardwareMonitor (çekirdek sürücüsü yükler, ağırdır) artık
-            // uygulama açılışında değil, telemetri sayfası ilk kez açıldığında başlatılır.
-            _hardwareMonitor = new HardwareMonitorService();
-            _hardwareMonitor.TelemetryUpdated += OnTelemetryUpdated;
+            // Donanım telemetrisi tepsiye aittir (pencere kapalıyken de alarm / GPU profili / kayıt çalışır).
+            // Pencere yalnızca görünen sayfanın ihtiyacını bildirir; tepsi hız ve kapsamı buna göre ayarlar.
+            Telemetry.TelemetryUpdated += OnTelemetryUpdated;
 
             this.IsVisibleChanged += (s, e) =>
             {
-                if (this.IsVisible && _currentPage == "telemetry")
-                    StartTelemetry();
-                else
-                    StopTelemetry();
+                ApplyPageTelemetryDemand();
 
                 // Gizli pencerede sonsuz animasyon boşuna çalışmasın
                 if (_pulseAnimation != null)
@@ -89,7 +84,7 @@ namespace Warden
                 if (this.IsVisible)
                 {
                     RefreshPresetsIfNeeded();
-                    if (_lastGpuData != null) UpdateGpuData(_lastGpuData);
+                    if (_context.LastSnapshot != null) UpdateGpuData(_context.LastSnapshot);
                 }
             };
 
@@ -129,7 +124,6 @@ namespace Warden
         }
         private bool _isSavingSize = false;
         private System.Windows.Media.Animation.Storyboard? _pulseAnimation;
-        private GpuData? _lastGpuData;
 
         // ══════════════════════════════════════════════════════════════
         //  Window chrome
@@ -186,15 +180,14 @@ namespace Warden
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
-            StopTelemetry();
             if (!IsExitExplicit)
             {
                 e.Cancel = true;
-                this.Hide();
+                this.Hide();   // IsVisibleChanged telemetri ihtiyacını kaldırır
             }
             else
             {
-                _hardwareMonitor.Dispose();
+                Telemetry.TelemetryUpdated -= OnTelemetryUpdated;
                 base.OnClosing(e);
             }
         }
@@ -207,6 +200,12 @@ namespace Warden
 
         private void BtnNavSettings_Click(object sender, RoutedEventArgs e)
             => ShowPage("settings");
+
+        private void BtnNavStatus_Click(object sender, RoutedEventArgs e)
+            => ShowPage("status");
+
+        /// <summary>İlk açılışta tepsi çağırır: durum sayfasını göster.</summary>
+        public void ShowStatusPage() => ShowPage("status");
 
         private void BtnNavTelemetry_Click(object sender, RoutedEventArgs e)
             => ShowPage("telemetry");
@@ -228,27 +227,25 @@ namespace Warden
             pageGpuMonitor.Visibility    = page == "gpu"       ? Visibility.Visible : Visibility.Collapsed;
             pageTelemetry.Visibility     = page == "telemetry" ? Visibility.Visible : Visibility.Collapsed;
             pageSettings.Visibility      = page == "settings"  ? Visibility.Visible : Visibility.Collapsed;
+            pageStatus.Visibility        = page == "status"    ? Visibility.Visible : Visibility.Collapsed;
 
             rectHomeActive.Visibility      = page == "profiles"  ? Visibility.Visible : Visibility.Collapsed;
             rectDeviceActive.Visibility    = page == "devices"   ? Visibility.Visible : Visibility.Collapsed;
             rectGpuActive.Visibility       = page == "gpu"       ? Visibility.Visible : Visibility.Collapsed;
             rectTelemetryActive.Visibility = page == "telemetry" ? Visibility.Visible : Visibility.Collapsed;
             rectSettingsActive.Visibility  = page == "settings"  ? Visibility.Visible : Visibility.Collapsed;
+            rectStatusActive.Visibility    = page == "status"    ? Visibility.Visible : Visibility.Collapsed;
 
             btnNavHome.Foreground      = page == "profiles"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
             btnNavDevice.Foreground    = page == "devices"   ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
             btnNavGpu.Foreground       = page == "gpu"       ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
             btnNavTelemetry.Foreground = page == "telemetry" ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
             btnNavSettings.Foreground  = page == "settings"  ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
+            btnNavStatus.Foreground    = page == "status"    ? (Brush)FindResource("Accent") : (Brush)FindResource("TxtSecond");
 
-            if (page == "telemetry")
-            {
-                StartTelemetry();
-            }
-            else
-            {
-                StopTelemetry();
-            }
+            if (page == "status") _ = RunStatusChecksAsync();
+
+            ApplyPageTelemetryDemand();
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -262,6 +259,10 @@ namespace Warden
                 txtInterval.Text   = _context.Config.CheckIntervalMilliseconds.ToString();
                 chkStartup.IsChecked = _context.Config.StartWithWindows;
                 chkAutoUpdate.IsChecked = _context.Config.AutoCheckUpdates;
+                chkTempAlarm.IsChecked = _context.Config.TempAlarmEnabled;
+                txtCpuTempLimit.Text = _context.Config.CpuTempLimit.ToString();
+                txtGpuTempLimit.Text = _context.Config.GpuTempLimit.ToString();
+                chkAutoRecord.IsChecked = _context.Config.AutoRecordGameSessions;
 
                 foreach (ComboBoxItem item in cbLanguage.Items)
                 {
@@ -370,7 +371,6 @@ namespace Warden
         /// <summary>Tray'den "Reload Config" sonrası arayüzü yeni config ile yeniden doldurur.</summary>
         public void ReloadFromConfig()
         {
-            _telemetryInitialized = false;
             LoadInitialConfig();
             _suppressPresetSave = true;
             try
@@ -384,7 +384,7 @@ namespace Warden
             {
                 _suppressPresetSave = false;
             }
-            if (_currentPage == "telemetry" && IsVisible) StartTelemetry();
+            ApplyPageTelemetryDemand();
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -701,6 +701,8 @@ namespace Warden
 
             _context.Config.StartWithWindows = chkStartup.IsChecked == true;
             _context.Config.AutoCheckUpdates = chkAutoUpdate.IsChecked == true;
+            _context.Config.TempAlarmEnabled = chkTempAlarm.IsChecked == true;
+            ApplyTempLimitsFromUi();
 
             if (cbLanguage.SelectedItem is ComboBoxItem langItem)
                 _context.Config.Language = langItem.Tag?.ToString() ?? "TR";
@@ -906,6 +908,268 @@ namespace Warden
         }
 
         // ══════════════════════════════════════════════════════════════
+        //  Temperature alarm settings
+        // ══════════════════════════════════════════════════════════════
+        private void ApplyTempLimitsFromUi()
+        {
+            static int Parse(string text, int fallback)
+                => int.TryParse(text, out int v) ? Math.Clamp(v, AppConfig.MinTempLimit, AppConfig.MaxTempLimit) : fallback;
+
+            _context.Config.CpuTempLimit = Parse(txtCpuTempLimit.Text, _context.Config.CpuTempLimit);
+            _context.Config.GpuTempLimit = Parse(txtGpuTempLimit.Text, _context.Config.GpuTempLimit);
+            txtCpuTempLimit.Text = _context.Config.CpuTempLimit.ToString();
+            txtGpuTempLimit.Text = _context.Config.GpuTempLimit.ToString();
+        }
+
+        private void TxtTempLimit_LostFocus(object sender, RoutedEventArgs e) => AutoSaveSettings();
+
+        // ══════════════════════════════════════════════════════════════
+        //  Session recording (CSV)
+        // ══════════════════════════════════════════════════════════════
+        /// <summary>Kayıt kartını tepsideki kaydedicinin durumuna göre günceller.</summary>
+        public void UpdateRecordingState()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(UpdateRecordingState));
+                return;
+            }
+
+            var rec = _context.Recorder;
+            if (rec.IsRecording)
+            {
+                string kind = rec.IsAutomatic ? Loc.Get("RecordKindAuto") : Loc.Get("RecordKindManual");
+                txtRecordingStatus.Text = Loc.Format("RecordActive", rec.Label ?? "", kind,
+                                                     System.IO.Path.GetFileName(rec.CurrentFile ?? ""));
+                dotRecording.Fill = (Brush)FindResource("Red");
+                lblRecordBtn.Text = Loc.Get("RecordStop");
+                btnRecord.Style = (Style)FindResource("DangerButton");
+            }
+            else
+            {
+                txtRecordingStatus.Text = Loc.Get("RecordIdle");
+                dotRecording.Fill = (Brush)FindResource("TxtMuted");
+                lblRecordBtn.Text = Loc.Get("RecordStart");
+                btnRecord.Style = (Style)FindResource("AccentButton");
+            }
+        }
+
+        private void BtnRecord_Click(object sender, RoutedEventArgs e)
+        {
+            if (_context.Recorder.IsRecording) _context.Recorder.Stop();
+            else _context.StartManualRecording();
+            UpdateRecordingState();
+        }
+
+        private void BtnOpenSessions_Click(object sender, RoutedEventArgs e) => _context.OpenSessionsFolder();
+
+        private void ChkAutoRecord_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _isPopulatingControls) return;
+            _context.Config.AutoRecordGameSessions = chkAutoRecord.IsChecked == true;
+            // Kapatılırsa süren otomatik kayıt da biter (elle başlatılana dokunulmaz)
+            if (!_context.Config.AutoRecordGameSessions && _context.Recorder.IsRecording && _context.Recorder.IsAutomatic)
+                _context.Recorder.Stop();
+            _context.SaveConfig();
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  System status page
+        // ══════════════════════════════════════════════════════════════
+        private enum CheckState { Ok, Warning, Error, Pending }
+
+        private sealed record StatusCheck(CheckState State, string Title, string Detail, string? LinkText = null, string? Url = null);
+
+        private int _statusRunId;
+
+        private async Task RunStatusChecksAsync()
+        {
+            int runId = ++_statusRunId;
+            btnRecheckStatus.IsEnabled = false;
+            spStatusChecks.Children.Clear();
+            spStatusChecks.Children.Add(BuildStatusRow(new StatusCheck(CheckState.Pending, Loc.Get("StatusChecking"), "")));
+
+            try
+            {
+                var checks = new List<StatusCheck>();
+
+                // Yönetici yetkisi + kurulum konumu (ACL taraması dosya sayısına göre birkaç yüz ms sürebilir)
+                bool isAdmin = false, insecure = true;
+                string insecureReason = "";
+                await Task.Run(() =>
+                {
+                    using var id = System.Security.Principal.WindowsIdentity.GetCurrent();
+                    isAdmin = new System.Security.Principal.WindowsPrincipal(id)
+                        .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                    insecure = InstallLocationGuard.IsWritableByNonAdmins(Environment.ProcessPath ?? "", out insecureReason);
+                });
+
+                checks.Add(isAdmin
+                    ? new StatusCheck(CheckState.Ok, Loc.Get("StatusAdmin"), Loc.Get("StatusAdminOk"))
+                    : new StatusCheck(CheckState.Error, Loc.Get("StatusAdmin"), Loc.Get("StatusAdminMissing")));
+
+                checks.Add(insecure
+                    ? new StatusCheck(CheckState.Warning, Loc.Get("StatusInstall"), Loc.Format("StatusInstallInsecure", insecureReason))
+                    : new StatusCheck(CheckState.Ok, Loc.Get("StatusInstall"), Loc.Format("StatusInstallOk",
+                        System.IO.Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "")));
+
+                // SteelSeries GG + Sonar
+                bool ggInstalled;
+                try { _client.GetCorePropsPath(); ggInstalled = true; } catch { ggInstalled = false; }
+
+                if (!ggInstalled)
+                {
+                    checks.Add(new StatusCheck(CheckState.Warning, "SteelSeries GG", Loc.Get("StatusGgMissing"),
+                                               Loc.Get("StatusDownload"), "https://steelseries.com/gg"));
+                }
+                else
+                {
+                    checks.Add(new StatusCheck(CheckState.Ok, "SteelSeries GG", Loc.Get("StatusGgOk")));
+                    try
+                    {
+                        var addressTask = _client.GetSonarAddressAsync();
+                        if (await Task.WhenAny(addressTask, Task.Delay(8000)) != addressTask)
+                            throw new TimeoutException();
+                        string address = await addressTask;
+                        checks.Add(new StatusCheck(CheckState.Ok, "Sonar", Loc.Format("StatusSonarOk", address)));
+                    }
+                    catch
+                    {
+                        checks.Add(new StatusCheck(CheckState.Warning, "Sonar", Loc.Get("StatusSonarMissing")));
+                    }
+                }
+
+                // MSI Afterburner
+                string? afterburner = await Task.Run(() => _context.AfterburnerPath);
+                checks.Add(afterburner != null
+                    ? new StatusCheck(CheckState.Ok, "MSI Afterburner", afterburner)
+                    : new StatusCheck(CheckState.Warning, "MSI Afterburner", Loc.Get("StatusAfterburnerMissing"),
+                                      Loc.Get("StatusDownload"), "https://www.msi.com/Landing/afterburner/graphics-cards"));
+
+                // PawnIO
+                checks.Add(HardwareMonitorService.IsPawnIoInstalled
+                    ? new StatusCheck(CheckState.Ok, "PawnIO", Loc.Get("StatusPawnIoOk"))
+                    : new StatusCheck(CheckState.Warning, "PawnIO", Loc.Get("StatusPawnIoMissing"),
+                                      Loc.Get("StatusDownload"), "https://pawnio.eu/"));
+
+                // GPU (telemetri bu sayfa açıkken çalışır; ilk tarama birkaç saniye sürebilir)
+                for (int i = 0; i < 40 && _context.LastSnapshot?.HardwareReady != true; i++)
+                    await Task.Delay(250);
+                var gpu = _context.LastSnapshot?.PrimaryGpu;
+                checks.Add(gpu != null
+                    ? new StatusCheck(CheckState.Ok, Loc.Get("StatusGpu"), $"{gpu.Vendor} · {gpu.Name}")
+                    : new StatusCheck(CheckState.Warning, Loc.Get("StatusGpu"), Loc.Get("StatusGpuMissing")));
+
+                // Güncelleme
+                var update = _context.LastUpdateResult;
+                string installed = Loc.Format("UpdateCurrentVersion", UpdateService.CurrentVersion.ToString(3));
+                if (update is { Status: UpdateCheckStatus.UpdateAvailable, Update: { } pending })
+                    checks.Add(new StatusCheck(CheckState.Warning, Loc.Get("StatusUpdate"), Loc.Format("UpdateAvailable", pending.Tag)));
+                else if (update is { Status: UpdateCheckStatus.UpToDate })
+                    checks.Add(new StatusCheck(CheckState.Ok, Loc.Get("StatusUpdate"), installed));
+                else
+                    checks.Add(new StatusCheck(CheckState.Pending, Loc.Get("StatusUpdate"), installed));
+
+                if (runId != _statusRunId) return;   // bu arada yeniden başlatıldı
+                spStatusChecks.Children.Clear();
+                foreach (var c in checks) spStatusChecks.Children.Add(BuildStatusRow(c));
+            }
+            finally
+            {
+                if (runId == _statusRunId) btnRecheckStatus.IsEnabled = true;
+            }
+        }
+
+        private void BtnRecheckStatus_Click(object sender, RoutedEventArgs e) => _ = RunStatusChecksAsync();
+
+        private UIElement BuildStatusRow(StatusCheck check)
+        {
+            (string icon, string color) = check.State switch
+            {
+                CheckState.Ok => ("✔", "#00C9B1"),
+                CheckState.Warning => ("!", "#FACC15"),
+                CheckState.Error => ("✖", "#FF3B5C"),
+                _ => ("…", "#7A9A9A")
+            };
+
+            var row = new Border
+            {
+                Background = (Brush)FindResource("BgInput"),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(14, 12, 14, 12),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var iconText = new TextBlock
+            {
+                Text = icon,
+                Foreground = BrushFrom(color),
+                FontSize = 15,
+                FontWeight = FontWeights.Bold,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            grid.Children.Add(iconText);
+
+            var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            texts.Children.Add(new TextBlock
+            {
+                Text = check.Title,
+                Foreground = (Brush)FindResource("TxtPrimary"),
+                FontWeight = FontWeights.SemiBold
+            });
+            if (!string.IsNullOrEmpty(check.Detail))
+            {
+                texts.Children.Add(new TextBlock
+                {
+                    Text = check.Detail,
+                    Foreground = (Brush)FindResource("TxtSecond"),
+                    FontSize = 11,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 2, 12, 0)
+                });
+            }
+            Grid.SetColumn(texts, 1);
+            grid.Children.Add(texts);
+
+            if (check.Url != null)
+            {
+                var btn = new Button
+                {
+                    Content = check.LinkText,
+                    Style = (Style)FindResource("FlatButton"),
+                    Padding = new Thickness(12, 6, 12, 6),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Tag = check.Url
+                };
+                btn.Click += (s, e) => { if (s is Button b && b.Tag is string url) OpenUrl(url); };
+                Grid.SetColumn(btn, 2);
+                grid.Children.Add(btn);
+            }
+
+            row.Child = grid;
+            return row;
+        }
+
+        /// <summary>Bağlantıyı yükseltilmemiş kabuk üzerinden açar (tarayıcı yönetici yetkisi almasın).</summary>
+        private static void OpenUrl(string url)
+        {
+            try
+            {
+                using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{url}\"",
+                    UseShellExecute = false
+                });
+            }
+            catch { }
+        }
+
+        // ══════════════════════════════════════════════════════════════
         //  Updates
         // ══════════════════════════════════════════════════════════════
         private bool _updateBusy;
@@ -997,12 +1261,27 @@ namespace Warden
             _context.SaveConfig();
         }
 
-        public void UpdateGpuData(GpuData data)
+        /// <summary>GPU sayfasını birincil GPU ile günceller (NVIDIA, AMD veya Intel). Her thread'den çağrılabilir.</summary>
+        public void UpdateGpuData(TelemetrySnapshot snapshot)
         {
-            // Pencere tepsideyken (çoğu zaman) görünmeyen metinleri 2 sn'de bir güncelleme; gösterilince son veri basılır
-            _lastGpuData = data;
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => UpdateGpuData(snapshot)));
+                return;
+            }
+            // Pencere tepsideyken görünmeyen metinleri güncelleme; gösterilince son veri basılır
             if (!IsVisible) return;
 
+            var data = snapshot.PrimaryGpu;
+            if (data == null)
+            {
+                txtGpuName.Text = snapshot.HardwareReady ? Loc.Get("GpuNotFound") : Loc.Get("GpuDetecting");
+                txtGpuClock.Text = txtGpuTemp.Text = txtGpuUsage.Text = "–";
+                txtGpuClock.Foreground = (Brush)FindResource("TxtPrimary");
+                return;
+            }
+
+            txtGpuName.Text = data.Name;
             txtGpuClock.Text = Math.Round(data.CoreClockMhz).ToString();
             txtGpuTemp.Text = data.TemperatureCelsius.ToString();
             txtGpuUsage.Text = data.UsagePercentage.ToString();
@@ -1030,6 +1309,7 @@ namespace Warden
             btnNavGpu.ToolTip           = Loc.Get("NavGpuMonitor");
             btnNavTelemetry.ToolTip     = Loc.Get("NavTelemetry");
             btnNavSettings.ToolTip      = Loc.Get("NavSettings");
+            btnNavStatus.ToolTip        = Loc.Get("NavStatus");
 
             // Profiles Page
             lblPageHeader.Text          = Loc.Get("RulesHeader");
@@ -1075,6 +1355,17 @@ namespace Warden
             lblScanInterval.Text        = Loc.Get("ScanInterval");
             lblScanIntervalDesc.Text    = Loc.Get("ScanIntervalDesc");
             lblSaveBtn.Text             = Loc.Get("BtnSaveSettings");
+            lblTempAlarmSection.Text    = Loc.Get("TempAlarmSection");
+            lblTempAlarm.Text           = Loc.Get("TempAlarmTitle");
+            lblTempAlarmDesc.Text       = Loc.Get("TempAlarmDesc");
+            lblCpuTempLimit.Text        = Loc.Get("CpuTempLimit");
+            lblGpuTempLimit.Text        = Loc.Get("GpuTempLimit");
+            lblAutoRecord.Text          = Loc.Get("RecordAuto");
+            lblOpenSessions.Text        = Loc.Get("RecordOpenFolder");
+            lblStatusHeader.Text        = Loc.Get("StatusHeader");
+            lblStatusDesc.Text          = Loc.Get("StatusDesc");
+            lblRecheckStatus.Text       = Loc.Get("StatusRecheck");
+            UpdateRecordingState();
             lblUpdatesSection.Text      = Loc.Get("UpdatesSection");
             lblUpdateAutoCheck.Text     = Loc.Get("UpdateAutoCheck");
             lblUpdateAutoCheckDesc.Text = Loc.Get("UpdateAutoCheckDesc");
@@ -1100,17 +1391,19 @@ namespace Warden
         // ══════════════════════════════════════════════════════════════
         //  Hardware Telemetry & Monitor Logic
         // ══════════════════════════════════════════════════════════════
-        private void StartTelemetry()
+        /// <summary>Görünen sayfaya göre tepsiye telemetri ihtiyacını bildirir.</summary>
+        private void ApplyPageTelemetryDemand()
         {
-            if (_hardwareMonitor == null) return;
+            bool visible = IsVisible;
+            _context.SetUiTelemetryDemand("ui-telemetry", visible && _currentPage == "telemetry");
+            _context.SetUiTelemetryDemand("ui-gpu", visible && _currentPage == "gpu");
+            _context.SetUiTelemetryDemand("ui-status", visible && _currentPage == "status");
 
-            if (!_telemetryInitialized)
+            if (visible && _currentPage == "telemetry")
             {
-                _telemetryInitialized = true;
                 pnlPawnIoHint.Visibility = HardwareMonitorService.IsPawnIoInstalled ? Visibility.Collapsed : Visibility.Visible;
-                _hardwareMonitor.Initialize(_context.Config.TelemetryFavorites, _context.Config.TelemetryGraphSensors);
+                UpdateRecordingState();
             }
-            _hardwareMonitor.Start(1000);
         }
 
         private void LnkPawnIo_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
@@ -1128,11 +1421,6 @@ namespace Warden
             }
             catch { }
             e.Handled = true;
-        }
-
-        private void StopTelemetry()
-        {
-            _hardwareMonitor?.Stop();
         }
 
         private void OnTelemetryUpdated(object? sender, TelemetrySnapshot snapshot)
@@ -1621,19 +1909,17 @@ namespace Warden
 
         private void ToggleFavorite(string sensorId)
         {
-            if (_hardwareMonitor == null) return;
-            _hardwareMonitor.ToggleFavorite(sensorId);
+            Telemetry.ToggleFavorite(sensorId);
 
-            _context.Config.TelemetryFavorites = _hardwareMonitor.GetFavoriteIds();
+            _context.Config.TelemetryFavorites = Telemetry.GetFavoriteIds();
             _context.SaveConfig();
         }
 
         private void ToggleGraph(string sensorId)
         {
-            if (_hardwareMonitor == null) return;
-            _hardwareMonitor.ToggleGraph(sensorId);
+            Telemetry.ToggleGraph(sensorId);
 
-            _context.Config.TelemetryGraphSensors = _hardwareMonitor.GetGraphSensorIds();
+            _context.Config.TelemetryGraphSensors = Telemetry.GetGraphSensorIds();
             _context.SaveConfig();
         }
 

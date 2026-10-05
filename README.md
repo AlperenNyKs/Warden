@@ -11,10 +11,12 @@
 ## ✨ Features
 
 * **🎧 SteelSeries Sonar Auto EQ:** Automatically detects the foreground game and switches your SteelSeries Sonar "Game" channel to the configured EQ preset in real-time.
-* **📊 Hardware Telemetry & Monitor:** Live monitoring of CPU/GPU temperatures, clock speeds (MHz), wattage (W), and usage (%). Includes a real-time 60-second chart and quick-glance ⭐ Favorites system.
-* **⚡ MSI Afterburner GPU Control:** Monitors GPU clock speeds in the background and automatically applies target MSI Afterburner profiles when user-defined MHz limits are exceeded.
+* **📊 Hardware Telemetry & Monitor:** Live monitoring of CPU/GPU temperatures, clock speeds (MHz), wattage (W), and usage (%). Includes a real-time 60-second chart, quick-glance ⭐ Favorites, **temperature alarms** and **CSV session recording** (manual or automatic while a game is running).
+* **⚡ MSI Afterburner GPU Control:** Monitors the GPU clock (NVIDIA, AMD or Intel) in the background and automatically applies a target MSI Afterburner profile when a user-defined MHz limit is exceeded.
 * **🔇 Audio Device Enforcer:** Keeps unwanted or phantom virtual audio devices permanently disabled / hidden in the background.
 * **🚀 Zero-Flicker Tray Architecture:** Runs silently in the system tray, wakes up with single-click via global IPC, and launches at Windows startup without UAC prompts.
+* **🩺 System Status:** Shows on first launch which requirements (SteelSeries GG/Sonar, MSI Afterburner, PawnIO, GPU sensors, install location) are present and what to install for missing features.
+* **🔄 Auto Updates:** Checks GitHub Releases and installs new versions after SHA256 verification.
 * **🌍 Bilingual Support:** Full Turkish (TR) and English (EN) language support.
 
 ---
@@ -66,7 +68,7 @@ dotnet publish Warden.csproj -c Release -r win-x64 --self-contained true -o publ
 
 * **C# / .NET 10.0 Windows Desktop (WPF)**
 * **LibreHardwareMonitorLib** (Hardware Sensors & Telemetry)
-* **NvAPIWrapper & MSI Afterburner SDK**
+* **MSI Afterburner** (command-line profile switching)
 * **NAudio & CoreAudioApi** (Audio Device Management)
 
 ---
