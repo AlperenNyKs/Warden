@@ -15,6 +15,7 @@
 * **⚡ MSI Afterburner GPU Control:** Monitors the GPU clock (NVIDIA, AMD or Intel) in the background and automatically applies a target MSI Afterburner profile when a user-defined MHz limit is exceeded.
 * **🔇 Audio Device Enforcer:** Keeps unwanted or phantom virtual audio devices permanently disabled / hidden in the background.
 * **🚀 Zero-Flicker Tray Architecture:** Runs silently in the system tray, wakes up with single-click via global IPC, and launches at Windows startup without UAC prompts.
+* **🎮 Dashboard:** A HUD-style home screen with the active game and session time, CPU/GPU ring gauges, a 60-second temperature graph, memory/hot spot/fan/power tiles and status chips.
 * **🩺 System Status:** Shows on first launch which requirements (SteelSeries GG/Sonar, MSI Afterburner, PawnIO, GPU sensors, install location) are present and what to install for missing features.
 * **🔄 Auto Updates:** Checks GitHub Releases and installs new versions after SHA256 verification.
 * **🌍 Bilingual Support:** Full Turkish (TR) and English (EN) language support.

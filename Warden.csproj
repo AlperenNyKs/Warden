@@ -14,7 +14,7 @@
     <!-- Paketlerin onlarca dildeki uydu kaynak klasörlerini çıktıya kopyalama (uygulama yalnızca TR/EN) -->
     <SatelliteResourceLanguages>en;tr</SatelliteResourceLanguages>
     <!-- Sürüm: CI etiketten (v1.2.3) -p:Version ile ezer -->
-    <Version>1.2.1</Version>
+    <Version>1.3.0</Version>
   </PropertyGroup>
 
   <!-- Test projesi aynı klasör ağacında: kaynakları/çıktıları ana uygulamaya derlenmesin -->
@@ -30,6 +30,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Assets\icon.ico" />
     <Resource Include="Assets\icon.png" />
+    <Resource Include="Assets\Fonts\*.ttf" />
   </ItemGroup>
 
   <ItemGroup>

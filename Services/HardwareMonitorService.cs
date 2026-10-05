@@ -20,7 +20,7 @@ namespace Warden
         public string Unit { get; set; } = "";
         public bool IsFavorite { get; set; }
         public bool IsOnGraph { get; set; }
-        public string GraphColor { get; set; } = "#00C9B1";
+        public string GraphColor { get; set; } = "#FF8A3D";
         public List<float> History { get; } = new(60);
 
         public void AddHistory(float val)
@@ -101,14 +101,14 @@ namespace Warden
 
         public static readonly string[] GraphColors =
         {
-            "#00C9B1", // Turquoise
-            "#FF3B5C", // Neon Red
+            "#FF8A3D", // Orange (accent)
             "#38BDF8", // Sky Blue
-            "#FACC15", // Amber Yellow
             "#4ADE80", // Lime Green
             "#C084FC", // Purple
-            "#FB923C", // Orange
-            "#F43F5E"  // Rose
+            "#FACC15", // Amber Yellow
+            "#2DD4BF", // Teal
+            "#FF3B5C", // Neon Red
+            "#EDEDF2"  // White
         };
 
         public event EventHandler<TelemetrySnapshot>? TelemetryUpdated;

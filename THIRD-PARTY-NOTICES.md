@@ -13,6 +13,7 @@ unmodified and as separate libraries (DLLs). Their full license texts are in the
 | HidSharp | Apache-2.0 | James Bellinger | https://www.zer7.com/software/hidsharp |
 | NAudio | MIT | Mark Heath and contributors | https://github.com/naudio/NAudio |
 | .NET runtime and libraries (self-contained build) | MIT | .NET Foundation and contributors | https://github.com/dotnet/runtime |
+| Chakra Petch (font) | OFL-1.1 | The Chakra Petch Project Authors | https://github.com/m4rc1e/Chakra-Petch |
 | Mono.Posix.NETStandard | MIT | Mono Project / .NET Foundation | https://github.com/mono/mono |
 
 ## License texts
@@ -21,6 +22,7 @@ unmodified and as separate libraries (DLLs). Their full license texts are in the
   available at the URLs above.
 - `licenses/Apache-2.0.txt` — Apache License 2.0.
 - `licenses/NAudio-MIT.txt` — MIT License (NAudio).
+- `licenses/ChakraPetch-OFL.txt` — SIL Open Font License 1.1 (Chakra Petch, embedded unmodified).
 
 ## Not bundled
 
