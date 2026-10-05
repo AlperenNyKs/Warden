@@ -1306,21 +1306,27 @@ namespace Warden
                 _chartShapes.Remove(staleId);
             }
 
-            // Find min/max for scaling
-            float minVal = 0f;
-            float maxVal = 100f;
+            // Her birim (°C, MHz, W, % ...) kendi ölçeğinde çizilir. Eskiden tek ortak eksen vardı:
+            // grafiğe 4500 MHz eklenince 60 °C'lik sıcaklık çizgisi tabana yapışıyordu.
+            var unitRange = new Dictionary<string, float>(StringComparer.Ordinal);
             foreach (var s in graphSensors)
             {
+                // Yüzde ve sıcaklık için en az 0-100 aralığı: küçük dalgalanmalar abartılı görünmesin
+                float max = s.Unit is "%" or "°C" ? 100f : 1f;
                 foreach (var v in s.History)
                 {
-                    if (v > maxVal) maxVal = v;
+                    if (v > max) max = v;
                 }
+                unitRange[s.Unit] = unitRange.TryGetValue(s.Unit, out float existing) ? Math.Max(existing, max) : max;
             }
-            maxVal = (float)Math.Ceiling(maxVal * 1.1f / 10f) * 10f;
+            foreach (var unit in unitRange.Keys.ToList())
+            {
+                float max = unitRange[unit] * 1.1f;
+                float step = max > 1000 ? 100f : max > 100 ? 10f : 1f;
+                unitRange[unit] = Math.Max(1f, (float)Math.Ceiling(max / step) * step);
+            }
 
-            float range = maxVal - minVal;
-            if (range <= 0.01f) range = 1f;
-
+            const float minVal = 0f;
             double stepX = width / 59.0;
 
             foreach (var s in graphSensors)
@@ -1343,6 +1349,7 @@ namespace Warden
                     continue;
                 }
 
+                float range = unitRange[s.Unit] - minVal;
                 var strokeBrush = BrushFrom(s.GraphColor);
                 var points = new PointCollection(count);
                 Point lastPoint = new Point();
