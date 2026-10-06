@@ -55,6 +55,7 @@ dotnet run -c Release
    - `📈` butonuna basarak 60 saniyelik canlı grafiğe dahil edin.
    - **Kayıt:** "⏺ Kaydı başlat" ile o anki değerleri CSV dosyasına yazar (Excel ile açılır). "Kuralı olan bir oyun açıkken otomatik kaydet" seçiliyse oyun açılınca başlar, kapanınca durur. Dosyalar: `%AppData%\Warden\sessions`.
    - **Sıcaklık alarmı (Ayarlar):** CPU veya GPU sıcaklığı 10 saniye boyunca sınırın (varsayılan CPU 90°C, GPU 85°C) üstünde kalırsa bildirim gelir.
+   - **Oturum özeti (Ayarlar → Donanım izleme):** Kuralı olan bir oyun kapanınca oynama süresi ve oyun boyunca görülen en yüksek CPU/GPU sıcaklığı bildirim olarak gösterilir (ör. "War Thunder · 1 sa 42 dk / CPU en yüksek 88 °C · GPU en yüksek 79 °C"). 1 dakikadan kısa oturumlar gösterilmez.
 
 5. **GPU Monitör & Afterburner (GPU):**
    - NVIDIA, AMD ve Intel ekran kartlarını destekler. GPU saat hızı belirlenen sınırı aştığında hedef MSI Afterburner profilini otomatik uygular (Afterburner farklı bir klasöre kuruluysa da bulunur).

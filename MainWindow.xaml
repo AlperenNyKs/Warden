@@ -1512,6 +1512,22 @@
                                                     <TextBox x:Name="txtGpuTempLimit" Grid.Column="4"
                                                              HorizontalContentAlignment="Center" LostFocus="TxtTempLimit_LostFocus"/>
                                                 </Grid>
+                                                <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,12,0,0">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel VerticalAlignment="Center">
+                                                            <TextBlock x:Name="lblSessionSummary" Text=""
+                                                                       Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                            <TextBlock x:Name="lblSessionSummaryDesc" Text=""
+                                                                       Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap" Margin="0,2,16,0"/>
+                                                        </StackPanel>
+                                                        <CheckBox x:Name="chkSessionSummary" Grid.Column="1" VerticalAlignment="Center"
+                                                                  Checked="Setting_Changed" Unchecked="Setting_Changed"/>
+                                                    </Grid>
+                                                </Border>
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>

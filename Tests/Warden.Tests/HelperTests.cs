@@ -136,3 +136,76 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class SessionSummaryTrackerTests
+    {
+        private static readonly DateTime T0 = new(2026, 10, 6, 20, 0, 0, DateTimeKind.Utc);
+
+        [Fact]
+        public void EndingASession_ReturnsDurationAndMaxTemps()
+        {
+            var t = new SessionSummaryTracker();
+            Assert.Null(t.OnSessionChanged("aces.exe", T0));
+            t.Observe(70, 60);
+            t.Observe(88, 79);
+            t.Observe(75, 65);
+
+            var s = t.OnSessionChanged(null, T0.AddMinutes(102));
+
+            Assert.NotNull(s);
+            Assert.Equal("aces.exe", s!.Game);
+            Assert.Equal(TimeSpan.FromMinutes(102), s.Duration);
+            Assert.Equal(88f, s.MaxCpuTemp);
+            Assert.Equal(79f, s.MaxGpuTemp);
+            Assert.False(t.IsActive);
+        }
+
+        [Fact]
+        public void ShortSession_IsNotReported()
+        {
+            var t = new SessionSummaryTracker();
+            t.OnSessionChanged("aces.exe", T0);
+            Assert.Null(t.OnSessionChanged(null, T0.AddSeconds(40)));
+        }
+
+        [Fact]
+        public void UnreadableTemps_AreIgnored()
+        {
+            var t = new SessionSummaryTracker();
+            t.OnSessionChanged("aces.exe", T0);
+            t.Observe(null, 0);   // GPU sıcaklığı okunamadı (0)
+
+            var s = t.OnSessionChanged(null, T0.AddMinutes(5))!;
+            Assert.Null(s.MaxCpuTemp);
+            Assert.Null(s.MaxGpuTemp);
+        }
+
+        [Fact]
+        public void SwitchingGames_ReportsThePreviousAndStartsFresh()
+        {
+            var t = new SessionSummaryTracker();
+            t.OnSessionChanged("aces.exe", T0);
+            t.Observe(90, 80);
+
+            var first = t.OnSessionChanged("hunt.exe", T0.AddMinutes(10))!;
+            Assert.Equal("aces.exe", first.Game);
+
+            t.Observe(60, 50);
+            var second = t.OnSessionChanged(null, T0.AddMinutes(20))!;
+            Assert.Equal("hunt.exe", second.Game);
+            Assert.Equal(60f, second.MaxCpuTemp);   // önceki oyunun değerleri taşınmadı
+        }
+
+        [Fact]
+        public void ObservationsWithoutASession_AreIgnored()
+        {
+            var t = new SessionSummaryTracker();
+            t.Observe(95, 95);
+            t.OnSessionChanged("aces.exe", T0);
+            var s = t.OnSessionChanged(null, T0.AddMinutes(2))!;
+            Assert.Null(s.MaxCpuTemp);
+        }
+    }
+}

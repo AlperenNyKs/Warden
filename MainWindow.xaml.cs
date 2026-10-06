@@ -379,6 +379,7 @@ namespace Warden
                 chkModuleHardware.IsChecked = _context.Config.ModuleHardware;
                 chkModuleGpuProfile.IsChecked = _context.Config.ModuleGpuProfile;
                 chkTempAlarm.IsChecked = _context.Config.TempAlarmEnabled;
+                chkSessionSummary.IsChecked = _context.Config.SessionSummaryEnabled;
                 txtCpuTempLimit.Text = _context.Config.CpuTempLimit.ToString();
                 txtGpuTempLimit.Text = _context.Config.GpuTempLimit.ToString();
                 chkAutoRecord.IsChecked = _context.Config.AutoRecordGameSessions;
@@ -823,6 +824,7 @@ namespace Warden
             _context.Config.ModuleHardware = chkModuleHardware.IsChecked == true;
             _context.Config.ModuleGpuProfile = chkModuleGpuProfile.IsChecked == true;
             _context.Config.TempAlarmEnabled = chkTempAlarm.IsChecked == true;
+            _context.Config.SessionSummaryEnabled = chkSessionSummary.IsChecked == true;
             ApplyTempLimitsFromUi();
 
             if (cbLanguage.SelectedItem is ComboBoxItem langItem)
@@ -1758,6 +1760,8 @@ namespace Warden
             lblAutoSaveHint.Text        = Loc.Get("AutoSaveHint");
             lblTempAlarm.Text           = Loc.Get("TempAlarmTitle");
             lblTempAlarmDesc.Text       = Loc.Get("TempAlarmDesc");
+            lblSessionSummary.Text      = Loc.Get("SessionSummary");
+            lblSessionSummaryDesc.Text  = Loc.Get("SessionSummaryDesc");
             lblCpuTempLimit.Text        = Loc.Get("CpuTempLimit");
             lblGpuTempLimit.Text        = Loc.Get("GpuTempLimit");
             lblAutoRecord.Text          = Loc.Get("RecordAuto");
