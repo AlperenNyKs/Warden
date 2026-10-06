@@ -369,7 +369,7 @@ namespace Warden
             _isPopulatingControls = true;
             try
             {
-                txtInterval.Text   = _context.Config.CheckIntervalMilliseconds.ToString();
+                PopulateIntervalChoices(_context.Config.CheckIntervalMilliseconds);
                 chkStartup.IsChecked = _context.Config.StartWithWindows;
                 chkAutoUpdate.IsChecked = _context.Config.AutoCheckUpdates;
                 chkAutoScan.IsChecked = _context.Config.AutoScanGames;
@@ -810,10 +810,9 @@ namespace Warden
         private void ApplySettingsFromUi()
         {
             // 0, negatif veya çok küçük değer watcher Timer'ını bozuyordu (0 = tek sefer, negatif = exception)
-            if (int.TryParse(txtInterval.Text, out int interval))
+            if (cbInterval.SelectedValue is int interval)
                 _context.Config.CheckIntervalMilliseconds =
                     Math.Clamp(interval, AppConfig.MinCheckIntervalMs, AppConfig.MaxCheckIntervalMs);
-            txtInterval.Text = _context.Config.CheckIntervalMilliseconds.ToString();
 
             _context.Config.StartWithWindows = chkStartup.IsChecked == true;
             _context.Config.AutoCheckUpdates = chkAutoUpdate.IsChecked == true;
@@ -842,10 +841,39 @@ namespace Warden
             AutoSaveSettings();
         }
 
-        private void TxtInterval_LostFocus(object sender, RoutedEventArgs e)
+        private void CbInterval_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             AutoSaveSettings();
         }
+
+        // Oyun kontrol sıklığı seçenekleri (ms). Elle config'e yazılmış başka bir değer varsa listeye eklenir.
+        private static readonly int[] IntervalChoices = { 500, 1000, 2000, 5000 };
+
+        private void PopulateIntervalChoices(int currentMs)
+        {
+            var values = IntervalChoices.ToList();
+            if (!values.Contains(currentMs)) values.Add(currentMs);
+            values.Sort();
+
+            cbInterval.Items.Clear();
+            foreach (int ms in values)
+            {
+                string seconds = (ms / 1000.0).ToString("0.##", System.Globalization.CultureInfo.CurrentCulture);
+                cbInterval.Items.Add(new IntervalChoice { Text = Loc.Format("IntervalSeconds", seconds), Value = ms });
+            }
+            cbInterval.SelectedValue = currentMs;
+        }
+
+        // WPF bağlaması (DisplayMemberPath/SelectedValuePath) yalnızca public türlerin özelliklerini okuyabilir
+        public sealed class IntervalChoice
+        {
+            public string Text { get; set; } = "";
+            public int Value { get; set; }
+            public override string ToString() => Text;
+        }
+
+        private void BtnGoGpu_Click(object sender, RoutedEventArgs e) => ShowPage("gpu");
+        private void BtnGoDevices_Click(object sender, RoutedEventArgs e) => ShowPage("devices");
 
         private void LoadAudioDevices()
         {
@@ -962,16 +990,6 @@ namespace Warden
                     _context.UpdateTrayMenu();
                 }
             }
-        }
-
-        private async void BtnSaveSettings_Click(object sender, RoutedEventArgs e)
-        {
-            ApplySettingsFromUi();
-
-            // Brief feedback on button
-            lblSaveBtn.Text = Loc.Get("SavedSuccess");
-            await Task.Delay(1500);
-            lblSaveBtn.Text = Loc.Get("BtnSaveSettings");
         }
 
         private void BtnClearGames_Click(object sender, RoutedEventArgs e)
@@ -1737,8 +1755,7 @@ namespace Warden
             lblLanguage.Text            = Loc.Get("Language");
             lblScanInterval.Text        = Loc.Get("ScanInterval");
             lblScanIntervalDesc.Text    = Loc.Get("ScanIntervalDesc");
-            lblSaveBtn.Text             = Loc.Get("BtnSaveSettings");
-            lblTempAlarmSection.Text    = Loc.Get("TempAlarmSection");
+            lblAutoSaveHint.Text        = Loc.Get("AutoSaveHint");
             lblTempAlarm.Text           = Loc.Get("TempAlarmTitle");
             lblTempAlarmDesc.Text       = Loc.Get("TempAlarmDesc");
             lblCpuTempLimit.Text        = Loc.Get("CpuTempLimit");
@@ -1752,7 +1769,10 @@ namespace Warden
             lblUpdatesSection.Text      = Loc.Get("UpdatesSection");
             lblUpdateAutoCheck.Text     = Loc.Get("UpdateAutoCheck");
             lblUpdateAutoCheckDesc.Text = Loc.Get("UpdateAutoCheckDesc");
-            lblGamesSection.Text        = Loc.Get("GamesSection");
+            lblGpuSettingsHint.Text     = Loc.Get("GpuSettingsHint");
+            lblGoGpu.Text               = Loc.Get("GoToGpuPage");
+            lblDeviceSettingsHint.Text  = Loc.Get("DeviceSettingsHint");
+            lblGoDevices.Text           = Loc.Get("GoToDevicesPage");
             lblAutoScan.Text            = Loc.Get("AutoScan");
             lblAutoScanDesc.Text        = Loc.Get("AutoScanDesc");
             lblAutoAssign.Text          = Loc.Get("AutoAssign");
