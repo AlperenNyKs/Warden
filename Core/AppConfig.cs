@@ -60,6 +60,9 @@ namespace Warden
         public int CpuTempLimit { get; set; } = 90;
         public int GpuTempLimit { get; set; } = 85;
 
+        // Oyun kapanınca süre ve en yüksek CPU/GPU sıcaklığıyla bildirim (donanım izleme modülünün parçası)
+        public bool SessionSummaryEnabled { get; set; } = true;
+
         // Oyun kuralı aktifken telemetriyi CSV'ye otomatik kaydet
         public bool AutoRecordGameSessions { get; set; } = false;
 

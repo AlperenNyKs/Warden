@@ -32,6 +32,7 @@ namespace Warden
         public HardwareMonitorService Telemetry { get; } = new();
         public SessionRecorder Recorder { get; }
         private readonly TempAlarmMonitor _tempAlarm = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10));
+        private readonly SessionSummaryTracker _sessionSummary = new();
         private readonly object _telemetryHandlerLock = new();
         private readonly HashSet<string> _uiTelemetryDemand = new(StringComparer.Ordinal);
         private bool _telemetryInitialized;
@@ -919,7 +920,8 @@ namespace Warden
             }
 
             bool recording = Recorder.IsRecording;
-            bool background = (Config.GpuProfileActive && Config.TargetMhz > 0) || Config.TempAlarmEnabled;
+            bool background = (Config.GpuProfileActive && Config.TargetMhz > 0) || Config.TempAlarmEnabled ||
+                              (Config.SessionSummaryEnabled && _sessionSummary.IsActive);   // özet için oyun süresince
 
             if (!(anyUi || recording || background))
             {
@@ -958,6 +960,7 @@ namespace Warden
                 {
                     if (Config.GpuProfileActive && snapshot.PrimaryGpu != null) HandleGpuProfile(snapshot.PrimaryGpu);
                     if (Config.TempAlarmEnabled) HandleTempAlarm(snapshot);
+                    _sessionSummary.Observe(snapshot.CpuTemperature, snapshot.PrimaryGpu?.TemperatureCelsius);
                     if (Recorder.IsRecording) Recorder.Write(snapshot);
                 }
                 catch (Exception ex)
@@ -995,6 +998,15 @@ namespace Warden
             ActiveGameSince = game != null ? DateTime.Now : null;
             _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.OnGameSessionChanged()));
 
+            var summary = _sessionSummary.OnSessionChanged(game, DateTime.UtcNow);
+            if (summary != null && Config.SessionSummaryEnabled && Config.ModuleHardware)
+            {
+                string text = FormatSessionSummary(summary);
+                Log($"[Session] {text.Replace('\n', ' ')}");
+                ShowBalloon(10000, text, ToolTipIcon.Info);
+            }
+            UpdateTelemetryDemand();   // oyun süresince sensörler özet için çalışsın, bitince dursun
+
             if (!Config.AutoRecordGameSessions || !Config.ModuleHardware) return;
             try
             {
@@ -1017,6 +1029,26 @@ namespace Warden
             {
                 Log($"[Recorder] {ex.Message}");
             }
+        }
+
+        /// <summary>"War Thunder · 1 sa 42 dk" + (okunabildiyse) en yüksek CPU/GPU sıcaklığı.</summary>
+        private string FormatSessionSummary(SessionSummary s)
+        {
+            // Kural anahtarı exe adıdır ("aces.exe"); taramanın bulduğu oyun adı varsa onu göster
+            string name = Config.DiscoveredGameNames.TryGetValue(s.Game, out var n) && !string.IsNullOrEmpty(n)
+                ? n
+                : System.IO.Path.GetFileNameWithoutExtension(s.Game);
+
+            int hours = (int)s.Duration.TotalHours;
+            string duration = hours > 0
+                ? Loc.Format("DurationHoursMinutes", hours, s.Duration.Minutes)
+                : Loc.Format("DurationMinutes", (int)s.Duration.TotalMinutes);
+
+            string text = Loc.Format("SessionSummaryTitle", name, duration);
+            var temps = new List<string>();
+            if (s.MaxCpuTemp is float cpu) temps.Add(Loc.Format("SessionSummaryMaxTemp", "CPU", Math.Round(cpu)));
+            if (s.MaxGpuTemp is float gpu) temps.Add(Loc.Format("SessionSummaryMaxTemp", "GPU", Math.Round(gpu)));
+            return temps.Count > 0 ? text + "\n" + string.Join(" · ", temps) : text;
         }
 
         public void StartManualRecording()
