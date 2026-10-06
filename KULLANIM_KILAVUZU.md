@@ -43,7 +43,7 @@ dotnet run -c Release
    - Uygulama bu sayfayla açılır. Aktif oyun ve oturum süresi, CPU/GPU sıcaklık göstergeleri, son 60 saniyelik sıcaklık grafiği, bellek / GPU hot spot / fan / CPU gücü ve bağlantı durumları tek ekranda. Buradan kayıt başlatabilir veya oyunları tarayabilirsin.
 
 3. **Profilleri Ayarlama (Sonar):**
-   - Warden açıldıktan yaklaşık 30 saniye sonra yüklü oyunları kendisi tarar. Yeni veya kaldırılmış oyun varsa bildirim gösterir; bildirime tıklayınca bu sayfa açılır. Ayarlar → Oyunlar bölümünden kapatılabilir.
+   - Warden açıldıktan yaklaşık 30 saniye sonra yüklü oyunları kendisi tarar. Yeni veya kaldırılmış oyun varsa bildirim gösterir; bildirime tıklayınca bu sayfa açılır. Ayarlar → Sonar profil geçişi kartından kapatılabilir.
    - İstediğiniz an **"Yüklü Oyunları Tara"** butonuyla elle de tarayabilirsiniz.
    - SteelSeries GG'de oyuna özel bir profili olan oyunlara (ör. "Valorant Pro Preset", "War Thunder") o profil otomatik atanır. Var olan kurallarınız değiştirilmez; otomatik atanan bir kuralı silerseniz tekrar atanmaz.
    - Bilgisayardan kaldırılan oyunlar bir sonraki taramada listeden ve kurallardan silinir. Elle eklediğiniz oyunlara dokunulmaz.
@@ -70,6 +70,7 @@ dotnet run -c Release
    - Kapalı modül arka planda hiç çalışmaz: Sonar kapalıyken GG'ye bağlanılmaz, donanım izleme kapalıyken sensör sürücüsü yüklenmez. Sayfası menüde soluk görünür; açmak için sayfadaki **"Modülü aç"** butonunu kullanabilirsiniz.
    - Sonar kapalıyken de oyun takibi sürer: Panel'deki aktif oyun ve oyun açılınca otomatik CSV kaydı çalışmaya devam eder.
    - GPU profili saat hızını sensörlerden okuduğu için donanım izleme açık olmalıdır.
+   - Her modülün kendi ayarları kendi kartındadır (ör. oyun kontrol sıklığı ve oyun taraması Sonar kartında, sıcaklık alarmı Donanım izleme kartında); modül kapalıyken bu ayarlar gizlenir. Ayarlar anında kaydedilir, ayrı bir "Kaydet" butonu yoktur.
 
 9. **Kapatma:**
    - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Çıkış"** (İngilizcede "Exit") diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.
