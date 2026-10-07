@@ -67,7 +67,7 @@ you played and how hot things got. Everything is modular: turn off what you don'
 
 ## Requirements
 
-| | |
+| Requirement | Details |
 |---|---|
 | **Windows** | Windows 10 or 11, 64-bit. Runs as administrator (needed for sensors and audio devices). |
 | **SteelSeries GG** *(optional)* | For Sonar profile switching. |
