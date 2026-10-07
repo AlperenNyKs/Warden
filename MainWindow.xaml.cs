@@ -203,6 +203,8 @@ namespace Warden
         private void BtnNavSettings_Click(object sender, RoutedEventArgs e)
             => ShowPage("settings");
 
+        private void BtnNavHistory_Click(object sender, RoutedEventArgs e) => ShowPage("history");
+
         private void BtnNavStatus_Click(object sender, RoutedEventArgs e)
             => ShowPage("status");
 
@@ -312,6 +314,101 @@ namespace Warden
         /// <summary>Oyun taraması bildirimine tıklanınca tepsi çağırır.</summary>
         public void ShowProfilesPage() => ShowPage("profiles");
 
+        // ══════════════════════════════════════════════════════════════
+        //  Game history page
+        // ══════════════════════════════════════════════════════════════
+
+        private const int HistoryRecentCount = 25;
+
+        /// <summary>Bir oyun oturumu geçmişe yazılınca tepsi çağırır; sayfa açıksa yeniden çizilir.</summary>
+        public void RefreshHistory()
+        {
+            if (_currentPage == "history") RenderHistory();
+        }
+
+        private void RenderHistory()
+        {
+            var sessions = _context.History.Sessions;
+            bool empty = sessions.Count == 0;
+            pnlHistoryEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+            pnlHistoryContent.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+            if (empty) return;
+
+            // Oyun başına: toplam süre, oturum, son oynama, sıcaklık (ortalama / en yüksek)
+            double[] gameCols = { 90, 60, 100, 100, 100 };
+            spHistoryGames.Children.Clear();
+            spHistoryGames.Children.Add(BuildHistoryRow(new[]
+            {
+                Loc.Get("HistoryColGame"), Loc.Get("HistoryColTotal"), Loc.Get("HistoryColSessions"),
+                Loc.Get("HistoryColLastPlayed"), Loc.Get("HistoryColCpu"), Loc.Get("HistoryColGpu")
+            }, gameCols, header: true, first: true));
+            foreach (var g in GameHistory.Aggregate(sessions))
+            {
+                spHistoryGames.Children.Add(BuildHistoryRow(new[]
+                {
+                    g.Name, Loc.Duration(g.TotalTime), g.Sessions.ToString(),
+                    g.LastPlayedUtc.ToLocalTime().ToString("d"),
+                    FormatTempPair(g.AvgCpuTemp, g.MaxCpuTemp), FormatTempPair(g.AvgGpuTemp, g.MaxGpuTemp)
+                }, gameCols, header: false, first: false));
+            }
+
+            // Son oturumlar, en yeni önce
+            double[] sessionCols = { 130, 80, 90, 90 };
+            spHistorySessions.Children.Clear();
+            spHistorySessions.Children.Add(BuildHistoryRow(new[]
+            {
+                Loc.Get("HistoryColGame"), Loc.Get("HistoryColDate"), Loc.Get("HistoryColDuration"),
+                Loc.Get("HistoryColCpuMax"), Loc.Get("HistoryColGpuMax")
+            }, sessionCols, header: true, first: true));
+            foreach (var s in sessions.OrderByDescending(x => x.StartUtc).Take(HistoryRecentCount))
+            {
+                spHistorySessions.Children.Add(BuildHistoryRow(new[]
+                {
+                    s.DisplayName, s.StartUtc.ToLocalTime().ToString("g"), Loc.Duration(s.Duration),
+                    FormatTemp(s.MaxCpuTemp), FormatTemp(s.MaxGpuTemp)
+                }, sessionCols, header: false, first: false));
+            }
+        }
+
+        private static string FormatTemp(float? t) => t is float v ? $"{Math.Round(v)} °C" : "–";
+
+        // "72 / 88 °C" (ortalama / en yüksek); sıcaklık okunamadıysa "–"
+        private static string FormatTempPair(float? avg, float? max)
+            => avg is float a && max is float m ? $"{Math.Round(a)} / {Math.Round(m)} °C" : "–";
+
+        /// <summary>Tablo satırı: ilk sütun esnek (oyun adı), diğerleri sabit genişlikte; satırlar arasında ince çizgi.</summary>
+        private UIElement BuildHistoryRow(string[] cells, double[] fixedWidths, bool header, bool first)
+        {
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            foreach (double w in fixedWidths)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w) });
+
+            for (int i = 0; i < cells.Length; i++)
+            {
+                var text = new TextBlock
+                {
+                    Text = cells[i],
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 8, 0),
+                    FontSize = header ? 10.5 : 12,
+                    FontWeight = header || i == 0 ? FontWeights.SemiBold : FontWeights.Normal,
+                    Foreground = (Brush)FindResource(header ? "TxtMuted" : i == 0 ? "TxtPrimary" : "TxtSecond")
+                };
+                Grid.SetColumn(text, i);
+                grid.Children.Add(text);
+            }
+
+            return new Border
+            {
+                BorderBrush = (Brush)FindResource("Border"),
+                BorderThickness = new Thickness(0, first ? 0 : 1, 0, 0),
+                Padding = new Thickness(0, 9, 0, 9),
+                Child = grid
+            };
+        }
+
         /// <summary>Arka plan taraması oyun listesini/kuralları değiştirince tepsi çağırır.</summary>
         public void RefreshGameList() => RenderRulesList();
 
@@ -338,6 +435,7 @@ namespace Warden
                 ("devices",   pageDeviceManager, rectDeviceActive,    btnNavDevice),
                 ("gpu",       pageGpuMonitor,    rectGpuActive,       btnNavGpu),
                 ("telemetry", pageTelemetry,     rectTelemetryActive, btnNavTelemetry),
+                ("history",   pageHistory,       rectHistoryActive,   btnNavHistory),
                 ("status",    pageStatus,        rectStatusActive,    btnNavStatus),
                 ("settings",  pageSettings,      rectSettingsActive,  btnNavSettings),
             };
@@ -357,6 +455,7 @@ namespace Warden
                 if (_context.LastSnapshot != null) RenderOverview(_context.LastSnapshot);
             }
             if (page == "status") _ = RunStatusChecksAsync();
+            if (page == "history") RenderHistory();
 
             ApplyPageTelemetryDemand();
         }
@@ -1697,6 +1796,12 @@ namespace Warden
             lblNavGpu.Text              = Loc.Get("NavShortGpu");
             lblNavTelemetry.Text        = Loc.Get("NavShortSensors");
             lblNavStatus.Text           = Loc.Get("NavShortStatus");
+            lblNavHistory.Text          = Loc.Get("NavShortHistory");
+            lblHistoryHeader.Text       = Loc.Get("HistoryHeader");
+            lblHistoryDesc.Text         = Loc.Get("HistoryDesc");
+            txtHistoryEmpty.Text        = Loc.Get("HistoryEmpty");
+            lblHistoryGamesSection.Text    = Loc.Get("HistoryGamesSection");
+            lblHistorySessionsSection.Text = Loc.Get("HistorySessionsSection");
             lblNavSettings.Text         = Loc.Get("NavShortSettings");
             lblOverviewHeader.Text      = Loc.Get("OvTitle");
             lblOverviewDesc.Text        = Loc.Get("OvDesc");
