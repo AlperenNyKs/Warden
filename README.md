@@ -74,6 +74,39 @@ dotnet publish Warden.csproj -c Release -r win-x64 --self-contained true -o publ
 
 ---
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+> Signing is being set up. Releases published before this is completed are **unsigned**; once it is in place,
+> every `Warden.exe` and `Warden-Setup-x.y.z.exe` on the [Releases](https://github.com/AlperenNyKs/Warden/releases)
+> page is built by GitHub Actions from this repository and signed in that same pipeline.
+
+**Team roles**
+
+* Committers and reviewers: [Alperen Burhan](https://github.com/AlperenNyKs)
+* Approvers: [Alperen Burhan](https://github.com/AlperenNyKs)
+
+Only release builds produced by the CI workflow in this repository are signed. Third-party components bundled with
+Warden are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); they are open source and are not modified.
+
+---
+
+## Privacy policy
+
+Warden does not collect, store remotely or sell any personal data, and it contains no telemetry or analytics.
+It will not transfer any information to other networked systems unless specifically requested by the user or the
+person installing or operating it, with these exceptions:
+
+* **Update check:** at startup and every 6 hours Warden asks the GitHub API (`api.github.com`) for the latest
+  release of this repository, and downloads the new setup from GitHub when you choose to install it. You can turn
+  this off in Settings → Updates. GitHub's [privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement) applies to these requests.
+* **SteelSeries GG / Sonar:** Warden talks to the local GG service on `127.0.0.1` only (your own computer).
+
+All settings, game history and recordings stay on your computer in `%AppData%\Warden`.
+
+---
+
 ## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
