@@ -148,9 +148,9 @@ namespace Warden.Tests
         {
             var t = new SessionSummaryTracker();
             Assert.Null(t.OnSessionChanged("aces.exe", T0));
-            t.Observe(70, 60);
-            t.Observe(88, 79);
-            t.Observe(75, 65);
+            t.Observe(70, 60, T0.AddMinutes(2));
+            t.Observe(88, 79, T0.AddMinutes(3));
+            t.Observe(75, 65, T0.AddMinutes(4));
 
             var s = t.OnSessionChanged(null, T0.AddMinutes(102));
 
@@ -175,7 +175,7 @@ namespace Warden.Tests
         {
             var t = new SessionSummaryTracker();
             t.OnSessionChanged("aces.exe", T0);
-            t.Observe(null, 0);   // GPU sıcaklığı okunamadı (0)
+            t.Observe(null, 0, T0.AddMinutes(2));   // GPU sıcaklığı okunamadı (0)
 
             var s = t.OnSessionChanged(null, T0.AddMinutes(5))!;
             Assert.Null(s.MaxCpuTemp);
@@ -187,12 +187,12 @@ namespace Warden.Tests
         {
             var t = new SessionSummaryTracker();
             t.OnSessionChanged("aces.exe", T0);
-            t.Observe(90, 80);
+            t.Observe(90, 80, T0.AddMinutes(2));
 
             var first = t.OnSessionChanged("hunt.exe", T0.AddMinutes(10))!;
             Assert.Equal("aces.exe", first.Game);
 
-            t.Observe(60, 50);
+            t.Observe(60, 50, T0.AddMinutes(12));
             var second = t.OnSessionChanged(null, T0.AddMinutes(20))!;
             Assert.Equal("hunt.exe", second.Game);
             Assert.Equal(60f, second.MaxCpuTemp);   // önceki oyunun değerleri taşınmadı
@@ -202,10 +202,27 @@ namespace Warden.Tests
         public void ObservationsWithoutASession_AreIgnored()
         {
             var t = new SessionSummaryTracker();
-            t.Observe(95, 95);
+            t.Observe(95, 95, T0);
             t.OnSessionChanged("aces.exe", T0);
             var s = t.OnSessionChanged(null, T0.AddMinutes(2))!;
             Assert.Null(s.MaxCpuTemp);
+        }
+
+        [Fact]
+        public void FirstMinute_IsLeftOutOfTempStatsButNotDuration()
+        {
+            var t = new SessionSummaryTracker();
+            t.OnSessionChanged("aces.exe", T0);
+            t.Observe(45, 40, T0.AddSeconds(10));   // yükleme ekranı: düşük yük
+            t.Observe(99, 95, T0.AddSeconds(50));   // shader derleme sıçraması
+            t.Observe(80, 70, T0.AddSeconds(60));   // ısınma süresi bitti → sayılır
+            t.Observe(84, 74, T0.AddMinutes(5));
+
+            var s = t.OnSessionChanged(null, T0.AddMinutes(10))!;
+            Assert.Equal(TimeSpan.FromMinutes(10), s.Duration);
+            Assert.Equal(82f, s.AvgCpuTemp);
+            Assert.Equal(84f, s.MaxCpuTemp);
+            Assert.Equal(74f, s.MaxGpuTemp);
         }
     }
 }
@@ -229,8 +246,8 @@ namespace Warden.Tests
         {
             var t = new SessionSummaryTracker();
             t.OnSessionChanged("aces.exe", T0);
-            t.Observe(60, 50);
-            t.Observe(80, 70);
+            t.Observe(60, 50, T0.AddMinutes(2));
+            t.Observe(80, 70, T0.AddMinutes(3));
             var s = t.OnSessionChanged(null, T0.AddMinutes(5))!;
             Assert.Equal(70f, s.AvgCpuTemp);
             Assert.Equal(60f, s.AvgGpuTemp);

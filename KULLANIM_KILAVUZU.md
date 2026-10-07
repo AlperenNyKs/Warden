@@ -65,7 +65,7 @@ dotnet run -c Release
 
 7. **Oyun Geçmişi (Geçmiş):**
    - Kuralı olan bir oyun kapanınca oturum kaydedilir (1 dakikadan kısa olanlar hariç): oyun başına toplam süre, oturum sayısı, son oynama tarihi ve ortalama / en yüksek CPU-GPU sıcaklığı; altında son 25 oturum.
-   - Sıcaklıklar için donanım izleme açık olmalıdır; oyun açıkken sensörler çalışmaya devam eder. Kayıtlar `%AppData%\Warden\history.json` dosyasındadır (en fazla 1000 oturum).
+   - Sıcaklıklar için donanım izleme açık olmalıdır; oyun açıkken sensörler çalışmaya devam eder. Oyunun ilk dakikası (yükleme ekranı, menü) sıcaklık ortalamasına ve en yüksek değere sayılmaz; oynama süresi yine baştan sayılır. Kayıtlar `%AppData%\Warden\history.json` dosyasındadır (en fazla 1000 oturum).
 
 8. **Sistem Durumu (Durum):**
    - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir. Kapalı modüllerin bağımlılıkları "Modül kapalı" olarak gösterilir.
