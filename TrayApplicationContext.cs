@@ -31,6 +31,7 @@ namespace Warden
         // Donanım telemetrisi: tek örnek, tepsi sahiplenir (pencere kapalıyken de alarm / GPU profili / kayıt çalışır)
         public HardwareMonitorService Telemetry { get; } = new();
         public SessionRecorder Recorder { get; }
+        public GameHistory History { get; }
         private readonly TempAlarmMonitor _tempAlarm = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10));
         private readonly SessionSummaryTracker _sessionSummary = new();
         private readonly object _telemetryHandlerLock = new();
@@ -95,6 +96,7 @@ namespace Warden
 
             _client = new SteelSeriesClient();
             Recorder = new SessionRecorder(Path.Combine(_appDataFolder, "sessions"));
+            History = new GameHistory(Path.Combine(_appDataFolder, "history.json"));
             Recorder.StateChanged += () =>
             {
                 UpdateTelemetryDemand();
@@ -921,7 +923,7 @@ namespace Warden
 
             bool recording = Recorder.IsRecording;
             bool background = (Config.GpuProfileActive && Config.TargetMhz > 0) || Config.TempAlarmEnabled ||
-                              (Config.SessionSummaryEnabled && _sessionSummary.IsActive);   // özet için oyun süresince
+                              _sessionSummary.IsActive;   // oyun süresince: özet ve geçmiş için sıcaklıklar
 
             if (!(anyUi || recording || background))
             {
@@ -999,13 +1001,27 @@ namespace Warden
             _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.OnGameSessionChanged()));
 
             var summary = _sessionSummary.OnSessionChanged(game, DateTime.UtcNow);
-            if (summary != null && Config.SessionSummaryEnabled && Config.ModuleHardware)
+            if (summary != null)
             {
                 string text = FormatSessionSummary(summary);
                 Log($"[Session] {text.Replace('\n', ' ')}");
-                ShowBalloon(10000, text, ToolTipIcon.Info);
+                History.Add(new GameSession
+                {
+                    Game = summary.Game,
+                    Name = GameDisplayName(summary.Game),
+                    StartUtc = summary.StartUtc,
+                    DurationSeconds = summary.Duration.TotalSeconds,
+                    AvgCpuTemp = summary.AvgCpuTemp,
+                    MaxCpuTemp = summary.MaxCpuTemp,
+                    AvgGpuTemp = summary.AvgGpuTemp,
+                    MaxGpuTemp = summary.MaxGpuTemp
+                });
+                _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.RefreshHistory()));
+
+                if (Config.SessionSummaryEnabled && Config.ModuleHardware)
+                    ShowBalloon(10000, text, ToolTipIcon.Info);
             }
-            UpdateTelemetryDemand();   // oyun süresince sensörler özet için çalışsın, bitince dursun
+            UpdateTelemetryDemand();   // oyun süresince sensörler özet ve geçmiş için çalışsın, bitince dursun
 
             if (!Config.AutoRecordGameSessions || !Config.ModuleHardware) return;
             try
@@ -1031,20 +1047,16 @@ namespace Warden
             }
         }
 
+        /// <summary>Kural anahtarı exe adıdır ("aces.exe"); taramanın bulduğu oyun adı varsa onu döndürür.</summary>
+        private string GameDisplayName(string game)
+            => Config.DiscoveredGameNames.TryGetValue(game, out var n) && !string.IsNullOrEmpty(n)
+                ? n
+                : System.IO.Path.GetFileNameWithoutExtension(game);
+
         /// <summary>"War Thunder · 1 sa 42 dk" + (okunabildiyse) en yüksek CPU/GPU sıcaklığı.</summary>
         private string FormatSessionSummary(SessionSummary s)
         {
-            // Kural anahtarı exe adıdır ("aces.exe"); taramanın bulduğu oyun adı varsa onu göster
-            string name = Config.DiscoveredGameNames.TryGetValue(s.Game, out var n) && !string.IsNullOrEmpty(n)
-                ? n
-                : System.IO.Path.GetFileNameWithoutExtension(s.Game);
-
-            int hours = (int)s.Duration.TotalHours;
-            string duration = hours > 0
-                ? Loc.Format("DurationHoursMinutes", hours, s.Duration.Minutes)
-                : Loc.Format("DurationMinutes", (int)s.Duration.TotalMinutes);
-
-            string text = Loc.Format("SessionSummaryTitle", name, duration);
+            string text = Loc.Format("SessionSummaryTitle", GameDisplayName(s.Game), Loc.Duration(s.Duration));
             var temps = new List<string>();
             if (s.MaxCpuTemp is float cpu) temps.Add(Loc.Format("SessionSummaryMaxTemp", "CPU", Math.Round(cpu)));
             if (s.MaxGpuTemp is float gpu) temps.Add(Loc.Format("SessionSummaryMaxTemp", "GPU", Math.Round(gpu)));

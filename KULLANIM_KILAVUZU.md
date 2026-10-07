@@ -63,15 +63,19 @@ dotnet run -c Release
 6. **Aygıt Yöneticisi (Ses):**
    - İstemediğiniz sanal veya hayalet ses aygıtlarını arka planda otomatik devre dışı bırakır.
 
-7. **Sistem Durumu (Durum):**
+7. **Oyun Geçmişi (Geçmiş):**
+   - Kuralı olan bir oyun kapanınca oturum kaydedilir (1 dakikadan kısa olanlar hariç): oyun başına toplam süre, oturum sayısı, son oynama tarihi ve ortalama / en yüksek CPU-GPU sıcaklığı; altında son 25 oturum.
+   - Sıcaklıklar için donanım izleme açık olmalıdır; oyun açıkken sensörler çalışmaya devam eder. Kayıtlar `%AppData%\Warden\history.json` dosyasındadır (en fazla 1000 oturum).
+
+8. **Sistem Durumu (Durum):**
    - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir. Kapalı modüllerin bağımlılıkları "Modül kapalı" olarak gösterilir.
 
-8. **Modüller (Ayarlar → Modüller):**
+9. **Modüller (Ayarlar → Modüller):**
    - Kullanmadığınız özellikleri kapatabilirsiniz: **Sonar profil geçişi**, **Ses cihazı denetleyicisi**, **Donanım izleme** (sensörler, sıcaklık alarmı, CSV kaydı) ve **GPU / Afterburner profili**.
    - Kapalı modül arka planda hiç çalışmaz: Sonar kapalıyken GG'ye bağlanılmaz, donanım izleme kapalıyken sensör sürücüsü yüklenmez. Sayfası menüde soluk görünür; açmak için sayfadaki **"Modülü aç"** butonunu kullanabilirsiniz.
    - Sonar kapalıyken de oyun takibi sürer: Panel'deki aktif oyun ve oyun açılınca otomatik CSV kaydı çalışmaya devam eder.
    - GPU profili saat hızını sensörlerden okuduğu için donanım izleme açık olmalıdır.
    - Her modülün kendi ayarları kendi kartındadır (ör. oyun kontrol sıklığı ve oyun taraması Sonar kartında, sıcaklık alarmı Donanım izleme kartında); modül kapalıyken bu ayarlar gizlenir. Ayarlar anında kaydedilir, ayrı bir "Kaydet" butonu yoktur.
 
-9. **Kapatma:**
+10. **Kapatma:**
    - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Çıkış"** (İngilizcede "Exit") diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.

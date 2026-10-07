@@ -206,7 +206,23 @@ namespace Warden
                     { "DurationHoursMinutes",   "{0} h {1} min" },
                     { "DurationMinutes",        "{0} min" },
                     { "SessionSummary",         "Show a summary when a game closes" },
-                    { "SessionSummaryDesc",     "A notification with the play time and the highest CPU and GPU temperature. Sensors keep running while a game is open." },
+                    { "SessionSummaryDesc",     "A notification with the play time and the highest CPU and GPU temperature." },
+                    { "HistoryColGpuMax",       "GPU MAX" },
+                    { "HistoryColCpuMax",       "CPU MAX" },
+                    { "HistoryColDuration",     "DURATION" },
+                    { "HistoryColDate",         "DATE" },
+                    { "HistoryColGpu",          "GPU AVG / MAX" },
+                    { "HistoryColCpu",          "CPU AVG / MAX" },
+                    { "HistoryColLastPlayed",   "LAST PLAYED" },
+                    { "HistoryColSessions",     "SESSIONS" },
+                    { "HistoryColTotal",        "TOTAL" },
+                    { "HistoryColGame",         "GAME" },
+                    { "HistorySessionsSection", "RECENT SESSIONS" },
+                    { "HistoryGamesSection",    "GAMES" },
+                    { "HistoryEmpty",           "No sessions yet. When a game with a rule is closed after at least a minute, it shows up here." },
+                    { "HistoryDesc",            "Sessions of games with a rule. Sessions under a minute are not saved; temperatures need hardware monitoring, which keeps running while a game is open." },
+                    { "HistoryHeader",          "Game History" },
+                    { "NavShortHistory",        "History" },
                     { "WarningSelectProcess",   "Please select or enter an executable name." },
                     { "WarningSelectPreset",    "Please select a target EQ preset." },
 
@@ -478,7 +494,23 @@ namespace Warden
                     { "DurationHoursMinutes",   "{0} sa {1} dk" },
                     { "DurationMinutes",        "{0} dk" },
                     { "SessionSummary",         "Oyun kapanınca özet göster" },
-                    { "SessionSummaryDesc",     "Oynama süresi ve en yüksek CPU ile GPU sıcaklığını bildirim olarak gösterir. Oyun açıkken sensörler çalışmaya devam eder." },
+                    { "SessionSummaryDesc",     "Oynama süresi ve en yüksek CPU ile GPU sıcaklığını bildirim olarak gösterir." },
+                    { "HistoryColGpuMax",       "GPU MAKS" },
+                    { "HistoryColCpuMax",       "CPU MAKS" },
+                    { "HistoryColDuration",     "SÜRE" },
+                    { "HistoryColDate",         "TARİH" },
+                    { "HistoryColGpu",          "GPU ORT / MAKS" },
+                    { "HistoryColCpu",          "CPU ORT / MAKS" },
+                    { "HistoryColLastPlayed",   "SON OYNAMA" },
+                    { "HistoryColSessions",     "OTURUM" },
+                    { "HistoryColTotal",        "TOPLAM" },
+                    { "HistoryColGame",         "OYUN" },
+                    { "HistorySessionsSection", "SON OTURUMLAR" },
+                    { "HistoryGamesSection",    "OYUNLAR" },
+                    { "HistoryEmpty",           "Henüz oturum yok. Kuralı olan bir oyun en az 1 dakika oynanıp kapatılınca burada görünür." },
+                    { "HistoryDesc",            "Kuralı olan oyunların oturumları. 1 dakikadan kısa oturumlar kaydedilmez; sıcaklıklar için donanım izleme açık olmalı, oyun açıkken sensörler çalışmaya devam eder." },
+                    { "HistoryHeader",          "Oyun Geçmişi" },
+                    { "NavShortHistory",        "Geçmiş" },
                     { "WarningSelectProcess",   "Lütfen bir işlem adı seçin veya yazın." },
                     { "WarningSelectPreset",    "Lütfen bir hedef EQ profili seçin." },
 
@@ -557,6 +589,15 @@ namespace Warden
         /// <summary>Yerelleştirilmiş metni string.Format ile doldurur.</summary>
         public static string Format(string key, params object[] args)
             => string.Format(Get(key), args);
+
+        /// <summary>"1 sa 42 dk" / "12 dk" (saat 24'ü geçse de saat olarak sayılır).</summary>
+        public static string Duration(TimeSpan duration)
+        {
+            int hours = (int)duration.TotalHours;
+            return hours > 0
+                ? Format("DurationHoursMinutes", hours, duration.Minutes)
+                : Format("DurationMinutes", (int)duration.TotalMinutes);
+        }
 
         public static string Get(string key)
         {

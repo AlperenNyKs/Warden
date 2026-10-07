@@ -209,3 +209,106 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class GameHistoryTests
+    {
+        private static readonly DateTime T0 = new(2026, 10, 6, 20, 0, 0, DateTimeKind.Utc);
+
+        private static GameSession S(string game, int minutes, float? avgCpu, float? maxCpu, int dayOffset = 0, string name = "") => new()
+        {
+            Game = game, Name = name, StartUtc = T0.AddDays(dayOffset), DurationSeconds = minutes * 60,
+            AvgCpuTemp = avgCpu, MaxCpuTemp = maxCpu
+        };
+
+        private static string TempFile() => System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"warden-history-{Guid.NewGuid():N}.json");
+
+        [Fact]
+        public void Tracker_ReportsAverageTemps()
+        {
+            var t = new SessionSummaryTracker();
+            t.OnSessionChanged("aces.exe", T0);
+            t.Observe(60, 50);
+            t.Observe(80, 70);
+            var s = t.OnSessionChanged(null, T0.AddMinutes(5))!;
+            Assert.Equal(70f, s.AvgCpuTemp);
+            Assert.Equal(60f, s.AvgGpuTemp);
+            Assert.Equal(T0, s.StartUtc);
+        }
+
+        [Fact]
+        public void Aggregate_SumsTimeAndWeightsAverageByDuration()
+        {
+            var stats = GameHistory.Aggregate(new[]
+            {
+                S("aces.exe", 90, 70, 85, 0, "War Thunder"),
+                S("ACES.exe", 30, 90, 95, 1, "War Thunder"),   // büyük/küçük harf farkı aynı oyun
+                S("hunt.exe", 200, null, null, 2, "Hunt"),     // sıcaklık okunamamış
+            });
+
+            Assert.Equal("hunt.exe", stats[0].Game);           // en çok oynanan önce
+            Assert.Null(stats[0].AvgCpuTemp);
+
+            var wt = stats[1];
+            Assert.Equal(TimeSpan.FromMinutes(120), wt.TotalTime);
+            Assert.Equal(2, wt.Sessions);
+            Assert.Equal(75f, wt.AvgCpuTemp);                  // (70*90 + 90*30) / 120
+            Assert.Equal(95f, wt.MaxCpuTemp);
+            Assert.Equal(T0.AddDays(1), wt.LastPlayedUtc);
+        }
+
+        [Fact]
+        public void DisplayName_FallsBackToExeName()
+        {
+            Assert.Equal("aces", S("aces.exe", 5, null, null).DisplayName);
+        }
+
+        [Fact]
+        public void Sessions_PersistAndReload()
+        {
+            string path = TempFile();
+            try
+            {
+                new GameHistory(path).Add(S("aces.exe", 42, 70, 85, 0, "War Thunder"));
+                var reloaded = new GameHistory(path).Sessions;
+                Assert.Single(reloaded);
+                Assert.Equal("War Thunder", reloaded[0].Name);
+                Assert.Equal(TimeSpan.FromMinutes(42), reloaded[0].Duration);
+            }
+            finally { System.IO.File.Delete(path); }
+        }
+
+        [Fact]
+        public void Add_KeepsOnlyTheNewestSessions()
+        {
+            string path = TempFile();
+            try
+            {
+                var h = new GameHistory(path);
+                for (int i = 0; i < GameHistory.MaxSessions + 5; i++) h.Add(S($"g{i}.exe", 1, null, null, i));
+                var sessions = h.Sessions;
+                Assert.Equal(GameHistory.MaxSessions, sessions.Count);
+                Assert.Equal("g5.exe", sessions[0].Game);      // en eski 5 oturum düştü
+            }
+            finally { System.IO.File.Delete(path); }
+        }
+
+        [Fact]
+        public void CorruptFile_StartsEmptyAndKeepsBackup()
+        {
+            string path = TempFile();
+            try
+            {
+                System.IO.File.WriteAllText(path, "{ not json");
+                Assert.Empty(new GameHistory(path).Sessions);
+                Assert.True(System.IO.File.Exists(path + ".bak"));
+            }
+            finally
+            {
+                System.IO.File.Delete(path);
+                System.IO.File.Delete(path + ".bak");
+            }
+        }
+    }
+}
