@@ -329,6 +329,8 @@ namespace Warden
         private void RenderHistory()
         {
             var sessions = _context.History.Sessions;
+            _ = RenderDiskUsageAsync(sessions);   // oturum olmasa da kurulu oyunlar gösterilir
+
             bool empty = sessions.Count == 0;
             pnlHistoryEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
             pnlHistoryContent.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
@@ -369,6 +371,73 @@ namespace Warden
                 }, sessionCols, header: false, first: false));
             }
         }
+
+        private int _diskRenderId;
+
+        /// <summary>
+        /// Kurulu oyunlar: boyut, son oynama, sürücü. Steam boyutları hemen; diğerleri klasör sayılınca gelir.
+        /// </summary>
+        private async Task RenderDiskUsageAsync(IReadOnlyList<GameSession> sessions)
+        {
+            int renderId = ++_diskRenderId;
+            var games = await _context.GetInstalledGamesAsync();
+            if (renderId != _diskRenderId) return;
+
+            var known = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            FillDiskUsage(games, sessions, known, sizesPending: games.Any(g => g.SizeBytes == null));
+
+            var sizes = await _context.GetFolderSizesAsync(games);
+            if (renderId != _diskRenderId) return;
+            FillDiskUsage(games, sessions, sizes, sizesPending: false);
+        }
+
+        private void FillDiskUsage(IReadOnlyList<DiscoveredGame> games, IReadOnlyList<GameSession> sessions,
+                                   IReadOnlyDictionary<string, long> folderSizes, bool sizesPending)
+        {
+            var now = DateTime.UtcNow;
+            var rows = DiskUsage.Build(games, sessions, folderSizes, now);
+
+            double[] cols = { 90, 150, 60 };
+            spHistoryDisk.Children.Clear();
+            spHistoryDisk.Children.Add(BuildHistoryRow(new[]
+            {
+                Loc.Get("HistoryColGame"), Loc.Get("HistoryColSize"), Loc.Get("HistoryColLastPlayed"), Loc.Get("HistoryColDrive")
+            }, cols, header: true, first: true));
+
+            foreach (var r in rows)
+            {
+                string size = r.SizeBytes is long b ? TrayApplicationContext.FormatBytes(b) : (sizesPending ? "…" : "–");
+                string last = r.LastPlayedKind switch
+                {
+                    LastPlayedKind.Never => Loc.Get("NeverPlayed"),
+                    LastPlayedKind.Unknown => Loc.Get("LastPlayedUnknown"),
+                    _ => FormatDaysAgo(now - r.LastPlayedUtc!.Value)
+                };
+                var row = (Border)BuildHistoryRow(new[] { r.Name, size, last, r.Drive.TrimEnd('\\') }, cols, header: false, first: false);
+                if (r.Unused && row.Child is Grid g && g.Children[2] is TextBlock lastText)
+                    lastText.Foreground = (Brush)FindResource("Accent");   // uzun süredir oynanmıyor
+                spHistoryDisk.Children.Add(row);
+            }
+
+            // Sürücülerin boş alanı; dolmak üzere olan kırmızı
+            spHistoryDrives.Children.Clear();
+            foreach (var d in DiskUsage.Drives(games.Select(x => x.InstallPath)))
+            {
+                spHistoryDrives.Children.Add(new TextBlock
+                {
+                    Text = Loc.Format(d.IsLow ? "DriveSpaceLow" : "DriveSpace", d.Drive.TrimEnd('\\'),
+                                      TrayApplicationContext.FormatBytes(d.FreeBytes),
+                                      TrayApplicationContext.FormatBytes(d.TotalBytes), Math.Round(d.FreeRatio * 100)),
+                    Foreground = (Brush)FindResource(d.IsLow ? "AccentRed" : "TxtSecond"),
+                    FontSize = 11.5,
+                    Margin = new Thickness(0, 4, 0, 0)
+                });
+            }
+        }
+
+        // "bugün" / "12 gün önce"
+        private static string FormatDaysAgo(TimeSpan ago)
+            => ago.TotalDays < 1 ? Loc.Get("Today") : Loc.Format("DaysAgo", (int)ago.TotalDays);
 
         private static string FormatTemp(float? t) => t is float v ? $"{Math.Round(v)} °C" : "–";
 
@@ -1802,6 +1871,8 @@ namespace Warden
             txtHistoryEmpty.Text        = Loc.Get("HistoryEmpty");
             lblHistoryGamesSection.Text    = Loc.Get("HistoryGamesSection");
             lblHistorySessionsSection.Text = Loc.Get("HistorySessionsSection");
+            lblHistoryDiskSection.Text  = Loc.Get("HistoryDiskSection");
+            lblHistoryDiskDesc.Text     = Loc.Get("HistoryDiskDesc");
             lblNavSettings.Text         = Loc.Get("NavShortSettings");
             lblOverviewHeader.Text      = Loc.Get("OvTitle");
             lblOverviewDesc.Text        = Loc.Get("OvDesc");

@@ -60,6 +60,9 @@ namespace Warden
         public int CpuTempLimit { get; set; } = 90;
         public int GpuTempLimit { get; set; } = 85;
 
+        // Oyun diski dolmak üzere uyarısı günde en fazla bir kez gösterilir
+        public DateTime? LastLowSpaceWarningDate { get; set; }
+
         // Oyun kapanınca süre ve en yüksek CPU/GPU sıcaklığıyla bildirim (donanım izleme modülünün parçası)
         public bool SessionSummaryEnabled { get; set; } = true;
 

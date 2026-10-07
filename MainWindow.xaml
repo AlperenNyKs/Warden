@@ -1316,6 +1316,23 @@
                                             <StackPanel x:Name="spHistorySessions"/>
                                         </Border>
                                     </StackPanel>
+
+                                    <!-- Kurulu oyunların disk alanı; oturum olmasa da gösterilir -->
+                                    <StackPanel x:Name="pnlHistoryDisk">
+                                        <TextBlock x:Name="lblHistoryDiskSection" Text="DİSK ALANI"
+                                                   Foreground="{StaticResource TxtSecond}"
+                                                   FontSize="11" FontWeight="Bold" Margin="0,24,0,4"/>
+                                        <TextBlock x:Name="lblHistoryDiskDesc" Text=""
+                                                   Foreground="{StaticResource TxtMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                        <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}"
+                                                BorderThickness="1" CornerRadius="10" Padding="18,10">
+                                            <StackPanel>
+                                                <StackPanel x:Name="spHistoryDisk"/>
+                                                <StackPanel x:Name="spHistoryDrives" Margin="0,8,0,4"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
                         </Grid>
