@@ -12,6 +12,9 @@ namespace Warden
         public string ExeName { get; set; } = "";
         public string GameName { get; set; } = "";
         public string Source { get; set; } = "";  // "Steam", "Epic", "GOG", "EA", "Xbox"
+        public string InstallPath { get; set; } = "";   // kurulum klasörü (disk alanı için)
+        public long? SizeBytes { get; set; }            // biliniyorsa (Steam SizeOnDisk); yoksa klasörden hesaplanır
+        public DateTime? LastPlayedUtc { get; set; }    // mağazanın kaydı (Steam LastPlayed); hiç oynanmadıysa null
     }
 
     public static class GameScanner
@@ -109,7 +112,10 @@ namespace Warden
                                 {
                                     ExeName = mainExe,
                                     GameName = gameName,
-                                    Source = "Steam"
+                                    Source = "Steam",
+                                    InstallPath = gameFolder,
+                                    SizeBytes = long.TryParse(ExtractVdfValue(acfContent, "SizeOnDisk"), out long size) && size > 0 ? size : null,
+                                    LastPlayedUtc = ParseUnixTime(ExtractVdfValue(acfContent, "LastPlayed"))
                                 });
                             }
                         }
@@ -157,7 +163,8 @@ namespace Warden
                         {
                             ExeName = exeName,
                             GameName = displayName,
-                            Source = "Epic"
+                            Source = "Epic",
+                            InstallPath = installLoc
                         });
                     }
                     catch { }
@@ -205,7 +212,8 @@ namespace Warden
                         {
                             ExeName = exeName,
                             GameName = gameName,
-                            Source = "GOG"
+                            Source = "GOG",
+                            InstallPath = !string.IsNullOrEmpty(gamePath) ? gamePath : Path.GetDirectoryName(exePath) ?? ""
                         });
                     }
                     catch { }
@@ -253,7 +261,8 @@ namespace Warden
                             {
                                 ExeName = exeName,
                                 GameName = string.IsNullOrEmpty(folderName) ? (gameId ?? exeName) : folderName,
-                                Source = "EA"
+                                Source = "EA",
+                                InstallPath = installPath
                             });
                         }
                         catch { }
@@ -292,7 +301,8 @@ namespace Warden
                         {
                             ExeName = exeName,
                             GameName = string.IsNullOrEmpty(folderName) ? Path.GetFileNameWithoutExtension(exeName) : folderName,
-                            Source = "Ubisoft"
+                            Source = "Ubisoft",
+                            InstallPath = installDir
                         });
                     }
                     catch { }
@@ -330,7 +340,8 @@ namespace Warden
                         {
                             ExeName = exeName,
                             GameName = Path.GetFileNameWithoutExtension(exeName),
-                            Source = "Xbox"
+                            Source = "Xbox",
+                            InstallPath = path
                         });
                     }
                     catch { }
@@ -379,7 +390,8 @@ namespace Warden
                                     {
                                         ExeName = exeName,
                                         GameName = displayName,
-                                        Source = "Riot Games"
+                                        Source = "Riot Games",
+                                        InstallPath = installPath
                                     });
                                 }
                             }
@@ -572,6 +584,12 @@ namespace Warden
 
             return false;
         }
+
+        // Steam LastPlayed: Unix zamanı; "0" = hiç oynanmadı
+        internal static DateTime? ParseUnixTime(string value)
+            => long.TryParse(value, out long seconds) && seconds > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime
+                : null;
 
         private static string ExtractVdfValue(string content, string key)
         {

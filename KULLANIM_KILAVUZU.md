@@ -66,6 +66,8 @@ dotnet run -c Release
 7. **Oyun Geçmişi (Geçmiş):**
    - Kuralı olan bir oyun kapanınca oturum kaydedilir (1 dakikadan kısa olanlar hariç): oyun başına toplam süre, oturum sayısı, son oynama tarihi ve ortalama / en yüksek CPU-GPU sıcaklığı; altında son 25 oturum.
    - Sıcaklıklar için donanım izleme açık olmalıdır; oyun açıkken sensörler çalışmaya devam eder. Oyunun ilk dakikası (yükleme ekranı, menü) sıcaklık ortalamasına ve en yüksek değere sayılmaz; oynama süresi yine baştan sayılır. Kayıtlar `%AppData%\Warden\history.json` dosyasındadır (en fazla 1000 oturum).
+   - **Disk alanı:** Kurulu oyunlar boyutlarıyla, en büyük önce listelenir. 60 gündür oynanmayan veya Steam'de hiç açılmamış oyunlar renkli gösterilir; böylece yer açmak için neyin silinebileceği görülür. Son oynama Steam oyunlarında Steam'in kendi kaydından, diğer mağazalarda Warden geçmişinden gelir (kayıt yoksa "Bilinmiyor"). Altta oyun sürücülerinin boş alanı yazar.
+   - Oyunların kurulu olduğu bir sürücüde boş alan %10'un altına düşerse açılış taramasından sonra bildirim gelir (günde en fazla bir kez).
 
 8. **Sistem Durumu (Durum):**
    - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir. Kapalı modüllerin bağımlılıkları "Modül kapalı" olarak gösterilir.

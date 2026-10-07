@@ -329,3 +329,99 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class DiskUsageTests
+    {
+        private static readonly DateTime Now = new(2026, 10, 7, 12, 0, 0, DateTimeKind.Utc);
+        private static readonly IReadOnlyDictionary<string, long> NoSizes = new Dictionary<string, long>();
+
+        private static DiscoveredGame G(string exe, string source, long? size, DateTime? lastPlayed, string path = "") => new()
+        {
+            ExeName = exe, GameName = exe.Replace(".exe", ""), Source = source, SizeBytes = size, LastPlayedUtc = lastPlayed,
+            InstallPath = path == "" ? $@"D:\Games\{exe}" : path
+        };
+
+        [Fact]
+        public void LastPlayed_TakesTheNewerOfStoreAndHistory()
+        {
+            var games = new[] { G("aces.exe", "Steam", 100, Now.AddDays(-90)) };
+            var history = new[] { new GameSession { Game = "ACES.exe", StartUtc = Now.AddDays(-3), DurationSeconds = 3600 } };
+
+            var r = DiskUsage.Build(games, history, NoSizes, Now).Single();
+
+            Assert.Equal(LastPlayedKind.Known, r.LastPlayedKind);
+            Assert.Equal(Now.AddDays(-3).AddHours(1), r.LastPlayedUtc);   // oturumun bitişi
+            Assert.False(r.Unused);
+        }
+
+        [Theory]
+        [InlineData(59, false)]
+        [InlineData(60, true)]
+        public void Unused_After60Days(int daysAgo, bool unused)
+        {
+            var r = DiskUsage.Build(new[] { G("a.exe", "Steam", 1, Now.AddDays(-daysAgo)) }, Array.Empty<GameSession>(), NoSizes, Now).Single();
+            Assert.Equal(unused, r.Unused);
+        }
+
+        [Fact]
+        public void NoRecord_IsNeverOnSteamButUnknownElsewhere()
+        {
+            var rows = DiskUsage.Build(new[] { G("steam.exe", "Steam", 2, null), G("epic.exe", "Epic", 1, null) },
+                                       Array.Empty<GameSession>(), NoSizes, Now);
+
+            var steam = rows.Single(r => r.ExeName == "steam.exe");
+            var epic = rows.Single(r => r.ExeName == "epic.exe");
+            Assert.Equal(LastPlayedKind.Never, steam.LastPlayedKind);
+            Assert.True(steam.Unused);
+            Assert.Equal(LastPlayedKind.Unknown, epic.LastPlayedKind);
+            Assert.False(epic.Unused);   // bilinmiyor → yanlışlıkla "oynanmıyor" denmez
+        }
+
+        [Fact]
+        public void Size_FallsBackToFolderSize_AndLargestComesFirst()
+        {
+            var games = new[]
+            {
+                G("small.exe", "Steam", 10, Now),
+                G("epic.exe", "Epic", null, Now, @"E:\Epic\Game"),
+                G("nosize.exe", "GOG", null, Now),
+            };
+            // GetFolderSizesAsync ile aynı: büyük/küçük harf duyarsız sözlük
+            var sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase) { [@"e:\epic\game"] = 500 };
+
+            var rows = DiskUsage.Build(games, Array.Empty<GameSession>(), sizes, Now);
+
+            Assert.Equal(new[] { "epic.exe", "small.exe", "nosize.exe" }, rows.Select(r => r.ExeName));
+            Assert.Equal(500, rows[0].SizeBytes);
+            Assert.Null(rows[2].SizeBytes);
+            Assert.Equal(@"E:\", rows[0].Drive);
+        }
+
+        [Fact]
+        public void GamesWithoutInstallPath_AreSkipped()
+        {
+            var g = G("x.exe", "Xbox", 1, Now);
+            g.InstallPath = "";
+            Assert.Empty(DiskUsage.Build(new[] { g }, Array.Empty<GameSession>(), NoSizes, Now));
+        }
+
+        [Theory]
+        [InlineData(90, 1000, true)]
+        [InlineData(100, 1000, false)]
+        public void DriveSpace_IsLowUnderTenPercent(long free, long total, bool low)
+        {
+            Assert.Equal(low, new DriveSpace(@"D:\", free, total).IsLow);
+        }
+
+        [Theory]
+        [InlineData("1791358643", 2026)]
+        [InlineData("0", null)]
+        [InlineData("", null)]
+        public void SteamLastPlayed_Parses(string value, int? year)
+        {
+            Assert.Equal(year, GameScanner.ParseUnixTime(value)?.Year);
+        }
+    }
+}

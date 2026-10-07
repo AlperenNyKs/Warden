@@ -61,6 +61,11 @@ namespace Warden
 
         // Oyun taraması: açılışta diske yük bindirmemek ve GG'nin hazır olması için gecikmeli
         private int _gameScanBusy;
+
+        // Son taramanın bulduğu kurulu oyunlar ve klasörden hesaplanan boyutlar (Geçmiş → Disk alanı)
+        private volatile IReadOnlyList<DiscoveredGame>? _installedGames;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _folderSizes =
+            new(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan AutoScanDelay = TimeSpan.FromSeconds(30);
 
         /// <summary>Son kontrol sonucu (ayarlar sayfası açılınca gösterilir).</summary>
@@ -637,6 +642,7 @@ namespace Warden
             try
             {
                 var games = await Task.Run(GameScanner.ScanAllGames);
+                _installedGames = games;
 
                 List<SonarConfig>? presets = null;
                 if (Config.ModuleSonar)   // Sonar kapalıysa GG'ye istek yok; oyunlar yine listeye eklenir
@@ -671,19 +677,78 @@ namespace Warden
                 if (!Config.AutoScanGames) return;
 
                 var result = await SyncGamesAsync();
-                if (result == null || !result.HasChanges) return;
+                if (result == null) return;
 
                 var lines = new List<string>();
                 if (result.Added.Count > 0)    lines.Add(Loc.Format("AutoScanAdded", JoinNames(result.Added)));
                 if (result.Assigned.Count > 0) lines.Add(Loc.Format("AutoScanAssigned", JoinNames(result.Assigned)));
                 if (result.Removed.Count > 0)  lines.Add(Loc.Format("AutoScanRemoved", JoinNames(result.Removed)));
-                ShowBalloon(8000, string.Join("\n", lines), ToolTipIcon.Info, isGameScan: true);
+                bool hasScanChanges = lines.Count > 0;
+
+                // Oyun diski dolmak üzereyse aynı bildirime eklenir (günde en fazla bir kez)
+                string? lowSpace = LowDiskSpaceWarning();
+                if (lowSpace != null) lines.Add(lowSpace);
+
+                if (lines.Count > 0)
+                    ShowBalloon(8000, string.Join("\n", lines), lowSpace != null ? ToolTipIcon.Warning : ToolTipIcon.Info,
+                                isGameScan: hasScanChanges);
             }
             catch (Exception ex)
             {
                 Log($"[Game scan] Startup scan failed: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// Oyun kurulu bir sürücüde boş alan azsa uyarı metni döndürür; aynı gün ikinci kez uyarmaz.
+        /// </summary>
+        private string? LowDiskSpaceWarning()
+        {
+            var games = _installedGames;
+            if (games == null) return null;
+            var low = DiskUsage.Drives(games.Select(g => g.InstallPath)).Where(d => d.IsLow).ToList();
+            if (low.Count == 0 || Config.LastLowSpaceWarningDate == DateTime.Today) return null;
+
+            Config.LastLowSpaceWarningDate = DateTime.Today;
+            _app.Dispatcher.Invoke(SaveConfig);
+            var d = low[0];
+            Log($"[Disk] Low space on {d.Drive}: {d.FreeBytes / (1024 * 1024 * 1024)} GB free");
+            return Loc.Format("LowDiskSpace", d.Drive, FormatBytes(d.FreeBytes), Math.Round(d.FreeRatio * 100));
+        }
+
+        /// <summary>Son taramanın kurulu oyunları; henüz tarama yapılmadıysa ayarlara dokunmadan bir kez tarar.</summary>
+        public async Task<IReadOnlyList<DiscoveredGame>> GetInstalledGamesAsync()
+        {
+            var games = _installedGames;
+            if (games != null) return games;
+            games = await Task.Run(GameScanner.ScanAllGames);
+            _installedGames = games;
+            return games;
+        }
+
+        /// <summary>
+        /// Mağazanın boyut bilgisi olmayan oyunların klasör boyutlarını arka planda hesaplar (önbellekli).
+        /// </summary>
+        public async Task<IReadOnlyDictionary<string, long>> GetFolderSizesAsync(IEnumerable<DiscoveredGame> games)
+        {
+            var missing = games.Where(g => g.SizeBytes == null && !string.IsNullOrEmpty(g.InstallPath) &&
+                                           !_folderSizes.ContainsKey(g.InstallPath))
+                               .Select(g => g.InstallPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (missing.Count > 0)
+            {
+                await Task.Run(() =>
+                {
+                    foreach (var path in missing) _folderSizes[path] = DiskUsage.FolderSize(path);
+                });
+            }
+            return new Dictionary<string, long>(_folderSizes, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>"86,0 GB" / "512 MB"</summary>
+        public static string FormatBytes(long bytes)
+            => bytes >= 1024L * 1024 * 1024
+                ? $"{bytes / (1024.0 * 1024 * 1024):0.0} GB"
+                : $"{bytes / (1024.0 * 1024):0} MB";
 
         // Balon bildirimi metni ~255 karakterle sınırlı: ilk 3 ad + "+N"
         private static string JoinNames(List<string> names)
