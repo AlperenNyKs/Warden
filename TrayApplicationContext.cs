@@ -962,7 +962,7 @@ namespace Warden
                 {
                     if (Config.GpuProfileActive && snapshot.PrimaryGpu != null) HandleGpuProfile(snapshot.PrimaryGpu);
                     if (Config.TempAlarmEnabled) HandleTempAlarm(snapshot);
-                    _sessionSummary.Observe(snapshot.CpuTemperature, snapshot.PrimaryGpu?.TemperatureCelsius);
+                    _sessionSummary.Observe(snapshot.CpuTemperature, snapshot.PrimaryGpu?.TemperatureCelsius, DateTime.UtcNow);
                     if (Recorder.IsRecording) Recorder.Write(snapshot);
                 }
                 catch (Exception ex)

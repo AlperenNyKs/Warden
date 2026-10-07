@@ -16,6 +16,10 @@ namespace Warden
         // Bundan kısa oturumlar (ör. oyunu açıp hemen kapatmak) bildirilmez ve geçmişe yazılmaz
         public static readonly TimeSpan MinDuration = TimeSpan.FromMinutes(1);
 
+        // Oyunun ilk dakikası (yükleme ekranı, menü, shader derleme) sıcaklık istatistiğine sayılmaz:
+        // düşük yük ortalamayı aşağı çeker, derleme sıçraması en yüksek değeri şişirir. Süre yine baştan sayılır.
+        public static readonly TimeSpan TempWarmUp = TimeSpan.FromMinutes(1);
+
         private readonly object _lock = new();
         private string? _game;
         private DateTime _startUtc;
@@ -44,12 +48,14 @@ namespace Warden
             }
         }
 
-        /// <summary>Telemetri ölçümü; oturum yoksa yok sayılır. 0 veya null "okunamadı" demektir.</summary>
-        public void Observe(float? cpuTemp, float? gpuTemp)
+        /// <summary>
+        /// Telemetri ölçümü; oturum yoksa veya oturumun ilk dakikasındaysa yok sayılır. 0 veya null "okunamadı" demektir.
+        /// </summary>
+        public void Observe(float? cpuTemp, float? gpuTemp, DateTime nowUtc)
         {
             lock (_lock)
             {
-                if (_game == null) return;
+                if (_game == null || nowUtc - _startUtc < TempWarmUp) return;
                 _cpu.Add(cpuTemp);
                 _gpu.Add(gpuTemp);
             }
