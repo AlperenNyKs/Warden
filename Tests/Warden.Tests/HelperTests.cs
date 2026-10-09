@@ -579,3 +579,98 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class BenchmarkCompareTests
+    {
+        private static readonly DateTime T0 = new(2026, 10, 9, 10, 0, 0, DateTimeKind.Utc);
+
+        // Sabit FPS'li kayıt: n saniye, her saniye 'fps' kare; sensörler sabit
+        private static BenchmarkRun Run(string label, int minutesAfter, double fps, float gpuTemp, float gpuPower, int seconds = 30) => new()
+        {
+            Id = label + minutesAfter, Label = label, StartUtc = T0.AddMinutes(minutesAfter), DurationSeconds = seconds,
+            FrameTimesMs = Enumerable.Repeat((float)(1000 / fps), (int)(fps * seconds)).ToArray(),
+            Samples = Enumerable.Range(1, seconds).Select(t => new BenchmarkSample { T = t, Fps = fps, GpuTemp = gpuTemp, GpuPower = gpuPower }).ToList()
+        };
+
+        [Fact]
+        public void Group_ByLabelCaseInsensitive_OldestGroupFirst()
+        {
+            var groups = BenchmarkCompare.Group(new[]
+            {
+                Run("UV 0.9V", 30, 100, 70, 120), Run("Stok", 0, 90, 80, 150), Run("stok ", 10, 110, 82, 150)
+            }, warmupSeconds: 0);
+
+            Assert.Equal(new[] { "Stok", "UV 0.9V" }, groups.Select(g => g.Label));
+            Assert.Equal(2, groups[0].Runs.Count);
+            var avgFps = BenchmarkCompare.Metrics.Single(m => m.Key == "AvgFps");
+            Assert.Equal(100.0, groups[0].Value(avgFps, EfficiencyBasis.Gpu)!.Value, 3);   // (90 + 110) / 2; kare süreleri float
+        }
+
+        [Theory]
+        [InlineData(100.0, 110.0, 10.0)]
+        [InlineData(80.0, 60.0, -25.0)]
+        public void PercentDiff_RelativeToBaseline(double baseline, double value, double expected)
+        {
+            Assert.Equal(expected, BenchmarkCompare.PercentDiff(baseline, value)!.Value, 6);
+        }
+
+        [Fact]
+        public void PercentDiff_NullWithoutBaseline()
+        {
+            Assert.Null(BenchmarkCompare.PercentDiff(null, 5));
+            Assert.Null(BenchmarkCompare.PercentDiff(0, 5));
+        }
+
+        [Fact]
+        public void Verdict_FollowsMetricDirection_AndIgnoresNoise()
+        {
+            var fps = BenchmarkCompare.Metrics.Single(m => m.Key == "AvgFps");
+            var temp = BenchmarkCompare.Metrics.Single(m => m.Key == "GpuTemp");
+            var clock = BenchmarkCompare.Metrics.Single(m => m.Key == "GpuClock");
+
+            Assert.Equal(1, BenchmarkCompare.Verdict(fps, 5));      // daha çok FPS iyi
+            Assert.Equal(-1, BenchmarkCompare.Verdict(temp, 5));    // daha sıcak kötü
+            Assert.Equal(1, BenchmarkCompare.Verdict(temp, -5));
+            Assert.Equal(0, BenchmarkCompare.Verdict(clock, 10));   // MHz yalnızca bilgi
+            Assert.Equal(0, BenchmarkCompare.Verdict(fps, 0.3));    // gürültü bandı
+        }
+
+        [Fact]
+        public void Series_StartsAfterWarmup_AndAveragesRunsPerSecond()
+        {
+            var g = BenchmarkCompare.Group(new[] { Run("A", 0, 100, 60, 100, 5), Run("A", 1, 100, 80, 100, 5) }, 2).Single();
+            var temp = BenchmarkCompare.ChartMetrics.Single(m => m.Key == "GpuTemp");
+
+            var series = BenchmarkCompare.Series(g, temp, warmupSeconds: 2);
+
+            Assert.Equal(new[] { 1.0, 2.0, 3.0 }, series.Select(p => p.T));   // T=3..5 → 1..3
+            Assert.All(series, p => Assert.Equal(70.0, p.Value, 6));
+        }
+
+        [Fact]
+        public void SummaryCsv_UsesRegionalSeparatorAndDecimals()
+        {
+            var groups = BenchmarkCompare.Group(new[] { Run("Stok", 0, 100, 80, 150), Run("UV", 5, 110, 70, 120) }, 0);
+            var tr = new System.Globalization.CultureInfo("tr-TR");
+
+            string csv = BenchmarkCompare.SummaryCsv(groups, EfficiencyBasis.Gpu, k => k, tr);
+            var lines = csv.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+
+            Assert.Equal("Metric;Stok (1);UV (1);UV %", lines[0]);
+            Assert.Equal("AvgFps;100,0;110,0;10,0", lines[1]);
+            Assert.Contains(lines, l => l.StartsWith("GpuTemp;80,0;70,0;-12,5"));
+        }
+
+        [Fact]
+        public void SamplesCsv_HasOneRowPerSample()
+        {
+            var groups = BenchmarkCompare.Group(new[] { Run("A", 0, 60, 70, 100, 3), Run("B", 1, 60, 70, 100, 2) }, 0);
+            var lines = BenchmarkCompare.SamplesCsv(groups, System.Globalization.CultureInfo.InvariantCulture)
+                                        .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+            Assert.Equal(1 + 3 + 2, lines.Length);
+            Assert.StartsWith("Label,Run,Game,T,FPS", lines[0]);
+        }
+    }
+}

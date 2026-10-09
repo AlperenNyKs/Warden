@@ -76,7 +76,10 @@ namespace Warden
             }
         }
 
-        /// <summary>Kaydı bitirir; kayıt yoksa null. Oyun adı boşsa RTSS'in gördüğü exe adı yazılır.</summary>
+        /// <summary>Son kaydın ölçtüğü uygulamanın tam exe yolu (RTSS'ten; oyun adını bulmak için).</summary>
+        public string LastTargetPath { get; private set; } = "";
+
+        /// <summary>Kaydı bitirir; kayıt yoksa null. Oyun adı boşsa çağıran LastTargetPath'ten bulur.</summary>
         public BenchmarkRun? Stop()
         {
             lock (_lock)
@@ -90,8 +93,7 @@ namespace Warden
                 run.DurationSeconds = (DateTime.UtcNow - _startUtc).TotalSeconds;
                 run.FrameTimesMs = _frames.ToArray();
                 run.FrameTimesExact = _frames.Count > 0;
-                if (string.IsNullOrEmpty(run.Game) && _targetName.Length > 0)
-                    run.Game = Path.GetFileNameWithoutExtension(_targetName);
+                LastTargetPath = _targetName;
                 return run;
             }
         }

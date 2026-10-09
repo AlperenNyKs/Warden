@@ -322,11 +322,26 @@ namespace Warden
             _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.RefreshBenchmarks()));
         }
 
+        /// <summary>
+        /// Kuralı olmayan oyun: RTSS'in exe yolu taramanın bildiği bir kurulum klasörünün içindeyse oyunun adı,
+        /// değilse bilinen exe adı, o da yoksa exe dosya adı.
+        /// </summary>
+        private string BenchmarkGameName(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath)) return "";
+            var installed = _installedGames?.FirstOrDefault(g =>
+                !string.IsNullOrEmpty(g.InstallPath) &&
+                exePath.StartsWith(Path.TrimEndingDirectorySeparator(g.InstallPath) + Path.DirectorySeparatorChar,
+                                   StringComparison.OrdinalIgnoreCase));
+            return installed?.GameName ?? GameDisplayName(Path.GetFileName(exePath));
+        }
+
         private void StopBenchmark()
         {
             var run = Benchmark.Stop();
             UpdateTelemetryDemand();
             if (run == null) return;
+            if (string.IsNullOrEmpty(run.Game)) run.Game = BenchmarkGameName(Benchmark.LastTargetPath);
 
             try { Benchmarks.Save(run); }
             catch (Exception ex) { Log($"[Benchmark] Save failed: {ex.Message}"); }
