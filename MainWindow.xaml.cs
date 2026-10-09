@@ -622,45 +622,133 @@ namespace Warden
 
         private readonly HashSet<string> _benchmarkSelected = new();
         private List<BenchmarkRun> _benchmarkRuns = new();
-        private List<CompareGroup> _compareGroups = new();
+        private List<CompareGroup> _compareGroups = new();          // ekrandaki sırayla
+        private CompareGroup? _compareBaseline;
+        private readonly List<string> _compareOrder = new();        // sürükle-bırak ile verilen sıra (etiketler)
+        private string? _compareBaselineLabel;                      // "Temel yap" ile seçilen
+        private readonly Dictionary<string, int> _compareColorSlots = new(StringComparer.CurrentCultureIgnoreCase);
+        private ChartView? _fpsChart, _metricChart;
 
-        // Kategorik palet (koyu mod, kart zemini #13131A üzerinde doğrulandı); sırası sabit, gruba göre atanır
+        // Kategorik palet (koyu mod, kart zemini #13131A üzerinde doğrulandı)
         private static readonly string[] SeriesColors = { "#3987e5", "#d95926", "#199e70", "#c98500" };
         private const string BetterColor = "#7EE787";
 
         private string MetricName(string key)
             => key == "FpsPerWatt" ? Loc.Format("CmpFpsPerWatt", BasisName(_context.Config.BenchmarkEfficiency)) : Loc.Get("Cmp" + key);
 
+        // Renk gruba bağlıdır, sıraya değil: sütun sürüklenince grubun rengi değişmez. Yeni gruba ilk boş renk verilir.
+        private string GroupColor(CompareGroup g) => SeriesColors[_compareColorSlots[g.Label]];
+
+        private void AssignColorSlots(IReadOnlyList<CompareGroup> groups)
+        {
+            var labels = groups.Select(g => g.Label).ToList();
+            foreach (var stale in _compareColorSlots.Keys.Where(k => !labels.Contains(k, StringComparer.CurrentCultureIgnoreCase)).ToList())
+                _compareColorSlots.Remove(stale);
+            foreach (var label in labels.Where(l => !_compareColorSlots.ContainsKey(l)))
+                _compareColorSlots[label] = Enumerable.Range(0, SeriesColors.Length).First(i => !_compareColorSlots.ContainsValue(i));
+        }
+
         private void RenderBenchmarkCompare()
         {
             int warmup = _context.Config.BenchmarkWarmupSeconds;
             var groups = BenchmarkCompare.Group(_benchmarkRuns.Where(r => _benchmarkSelected.Contains(r.Id)), warmup);
             bool trimmed = groups.Count > BenchmarkCompare.MaxGroups;
-            _compareGroups = groups.Take(BenchmarkCompare.MaxGroups).ToList();
+            groups = groups.Take(BenchmarkCompare.MaxGroups).ToList();
 
-            bool ready = _compareGroups.Count >= 2;
+            bool ready = groups.Count >= 2;
             pnlBenchmarkCompare.Visibility = ready ? Visibility.Visible : Visibility.Collapsed;
             btnBenchmarkExport.IsEnabled = ready;
             if (!ready)
             {
+                _compareGroups = groups;
+                _compareBaseline = null;
                 txtBenchmarkCompareHint.Text = Loc.Get("BenchmarkCompareHint");
                 return;
             }
 
-            txtBenchmarkCompareHint.Text = Loc.Format("BenchmarkCompareBaseline", _compareGroups[0].Label) +
-                                           (trimmed ? " " + Loc.Format("BenchmarkCompareMax", BenchmarkCompare.MaxGroups) : "");
-            BuildCompareTable();
+            AssignColorSlots(groups);
+            var (ordered, baseline) = BenchmarkCompare.Arrange(groups, _compareOrder, _compareBaselineLabel);
+            _compareGroups = ordered;
+            _compareBaseline = baseline;
 
-            if (cbBenchmarkChartMetric.Items.Count == 0)
-            {
-                foreach (var m in BenchmarkCompare.ChartMetrics)
-                    cbBenchmarkChartMetric.Items.Add(new ComboBoxItem { Content = Loc.Get("Chart" + m.Key), Tag = m });
-                cbBenchmarkChartMetric.SelectedIndex = 0;
-            }
-            RenderBenchmarkChart();
+            txtBenchmarkCompareHint.Text = Loc.Format("BenchmarkCompareBaseline", baseline.Label) +
+                                           (trimmed ? " " + Loc.Format("BenchmarkCompareMax", BenchmarkCompare.MaxGroups) : "");
+            BuildCompareHeadline();
+            BuildCompareWarnings();
+            BuildCompareTable();
+            RenderBenchmarkCharts();
         }
 
-        /// <summary>Ölçüler satırda, gruplar sütunda; temel dışındaki grupların değerinin altında yüzde fark.</summary>
+        /// <summary>"+2,8%" / "+6,0 °C"; anlamsız farkın başında "~".</summary>
+        private static string DiffText(CompareMetric m, Comparison c)
+        {
+            if (c.Diff is not double d) return "";
+            string sign = d >= 0 ? "+" : "";
+            string text = m.Absolute ? $"{sign}{d:0.0} °C" : $"{sign}{d:0.0}%";
+            return c.Verdict == DiffVerdict.NotSignificant ? "~" + text : text;
+        }
+
+        private Brush DiffBrush(Comparison c) => c.Verdict switch
+        {
+            DiffVerdict.Better => BrushFrom(BetterColor),
+            DiffVerdict.Worse => (Brush)FindResource("AccentRed"),
+            _ => (Brush)FindResource("TxtMuted")
+        };
+
+        /// <summary>Temel dışındaki her grup için tek satır: FPS, %1 low, kararlı GPU sıcaklığı, GPU gücü.</summary>
+        private void BuildCompareHeadline()
+        {
+            spBenchmarkHeadline.Children.Clear();
+            var basis = _context.Config.BenchmarkEfficiency;
+            var keys = new[] { ("AvgFps", "FPS"), ("Low1Fps", Loc.Get("HeadlineLow1")), ("GpuTempSteady", Loc.Get("HeadlineGpuTemp")),
+                               ("GpuPower", Loc.Get("HeadlineGpuPower")) };
+
+            foreach (var g in _compareGroups.Where(g => g != _compareBaseline))
+            {
+                var line = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
+                line.Children.Add(Swatch(GroupColor(g)));
+                line.Children.Add(new TextBlock
+                {
+                    Text = g.Label + ":", FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("TxtPrimary"),
+                    Margin = new Thickness(0, 0, 8, 0)
+                });
+                foreach (var (key, name) in keys)
+                {
+                    var m = BenchmarkCompare.Metric(key);
+                    var c = BenchmarkCompare.Compare(m, _compareBaseline!, g, basis);
+                    if (c.Diff == null) continue;
+                    line.Children.Add(new TextBlock { Text = name + " ", Foreground = (Brush)FindResource("TxtSecond") });
+                    line.Children.Add(new TextBlock { Text = DiffText(m, c), Foreground = DiffBrush(c), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 14, 0) });
+                }
+                spBenchmarkHeadline.Children.Add(line);
+            }
+        }
+
+        private void BuildCompareWarnings()
+        {
+            var notes = new List<string>();
+            if (BenchmarkCompare.DurationMismatch(_compareGroups)) notes.Add(Loc.Get("BenchmarkDurationMismatch"));
+            notes.Add(_compareGroups.Any(g => g.Runs.Count < 2) ? Loc.Get("BenchmarkSingleRunNote") : Loc.Get("BenchmarkSignificanceNote"));
+
+            spBenchmarkWarnings.Children.Clear();
+            foreach (var note in notes)
+                spBenchmarkWarnings.Children.Add(new TextBlock
+                {
+                    Text = "• " + note, Foreground = (Brush)FindResource("TxtMuted"), FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 2, 0, 0)
+                });
+        }
+
+        private static System.Windows.Shapes.Rectangle Swatch(string color) => new()
+        {
+            Width = 12, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = BrushFrom(color),
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0)
+        };
+
+        /// <summary>
+        /// Ölçüler satırda, gruplar sütunda (sabit genişlik). Başlıklar sürüklenerek yer değiştirir; "Temel yap" farkların
+        /// hangi gruba göre hesaplanacağını seçer.
+        /// </summary>
         private void BuildCompareTable()
         {
             var basis = _context.Config.BenchmarkEfficiency;
@@ -668,8 +756,8 @@ namespace Warden
             g.Children.Clear();
             g.RowDefinitions.Clear();
             g.ColumnDefinitions.Clear();
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
-            foreach (var _ in _compareGroups) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+            foreach (var _ in _compareGroups) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
 
             void Add(UIElement e, int row, int col)
             {
@@ -678,65 +766,36 @@ namespace Warden
                 g.Children.Add(e);
             }
 
-            // Başlık: renk işareti (grafikteki çizgi) + etiket + kayıt sayısı
             g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             for (int i = 0; i < _compareGroups.Count; i++)
-            {
-                var head = new StackPanel { Margin = new Thickness(0, 0, 8, 8) };
-                var title = new StackPanel { Orientation = Orientation.Horizontal };
-                title.Children.Add(new System.Windows.Shapes.Rectangle
-                {
-                    Width = 12, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = BrushFrom(SeriesColors[i]),
-                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0)
-                });
-                title.Children.Add(new TextBlock
-                {
-                    Text = _compareGroups[i].Label, FontWeight = FontWeights.SemiBold,
-                    Foreground = (Brush)FindResource("TxtPrimary"), TextTrimming = TextTrimming.CharacterEllipsis
-                });
-                head.Children.Add(title);
-                head.Children.Add(new TextBlock
-                {
-                    Text = Loc.Format("BenchmarkRunsCount", _compareGroups[i].Runs.Count) + (i == 0 ? " · " + Loc.Get("BenchmarkBaseline") : ""),
-                    Foreground = (Brush)FindResource("TxtMuted"), FontSize = 10.5
-                });
-                Add(head, 0, i + 1);
-            }
+                Add(BuildCompareHeader(_compareGroups[i]), 0, i + 1);
 
             int r = 1;
             foreach (var m in BenchmarkCompare.Metrics)
             {
                 g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                var line = new Border
-                {
-                    BorderBrush = (Brush)FindResource("Border"), BorderThickness = new Thickness(0, 1, 0, 0)
-                };
+                var line = new Border { BorderBrush = (Brush)FindResource("Border"), BorderThickness = new Thickness(0, 1, 0, 0) };
                 Grid.SetColumnSpan(line, _compareGroups.Count + 1);
                 Add(line, r, 0);
                 Add(new TextBlock
                 {
                     Text = MetricName(m.Key), Foreground = (Brush)FindResource("TxtSecond"), FontSize = 11.5,
-                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 7, 8, 7), TextWrapping = TextWrapping.Wrap
+                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 6, 8, 6), TextWrapping = TextWrapping.Wrap
                 }, r, 0);
 
-                double? baseline = _compareGroups[0].Value(m, basis);
                 for (int i = 0; i < _compareGroups.Count; i++)
                 {
-                    double? v = _compareGroups[i].Value(m, basis);
-                    var cell = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 7, 8, 7) };
-                    cell.Children.Add(new TextBlock { Text = Num(v, m.Format), Foreground = (Brush)FindResource("TxtPrimary"), FontWeight = FontWeights.SemiBold });
-                    if (i > 0 && BenchmarkCompare.PercentDiff(baseline, v) is double pct)
+                    var group = _compareGroups[i];
+                    var cell = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 6, 8, 6) };
+                    cell.Children.Add(new TextBlock { Text = Num(group.Value(m, basis), m.Format), Foreground = (Brush)FindResource("TxtPrimary"), FontWeight = FontWeights.SemiBold });
+                    if (group != _compareBaseline)
                     {
-                        int verdict = BenchmarkCompare.Verdict(m, pct);
-                        // İşaret metinde: renk tek başına anlam taşımaz
+                        var c = BenchmarkCompare.Compare(m, _compareBaseline!, group, basis);
                         cell.Children.Add(new TextBlock
                         {
-                            Text = $"  {(pct >= 0 ? "+" : "")}{pct:0.0}%",
-                            FontSize = 11,
-                            VerticalAlignment = VerticalAlignment.Center,
-                            Foreground = verdict > 0 ? BrushFrom(BetterColor)
-                                       : verdict < 0 ? (Brush)FindResource("AccentRed")
-                                       : (Brush)FindResource("TxtMuted")
+                            Text = "  " + DiffText(m, c), FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = DiffBrush(c),
+                            ToolTip = c.Verdict == DiffVerdict.NotSignificant ? Loc.Get("BenchmarkNotSignificantTip") : null
                         });
                     }
                     Add(cell, r, i + 1);
@@ -745,184 +804,249 @@ namespace Warden
             }
         }
 
-        // Grafik çerçevesi: hover hesabı için son çizimden saklanır
-        private List<(CompareGroup Group, List<(double T, double Value)> Points, string Color)> _chartSeries = new();
-        private double _chartMinT, _chartMaxT, _chartMinV, _chartMaxV, _chartLeft, _chartTop, _chartWidth, _chartHeight;
-        private string _chartUnit = "";
-
-        private const double ChartPadLeft = 46, ChartPadRight = 96, ChartPadTop = 8, ChartPadBottom = 22;
-
-        private static string FormatT(double t) => $"{(int)t / 60}:{(int)t % 60:00}";
-
-        private void RenderBenchmarkChart()
+        private UIElement BuildCompareHeader(CompareGroup group)
         {
-            var cvs = cvsBenchmarkChart;
-            cvs.Children.Clear();
-            cvsBenchmarkHover.Children.Clear();
+            bool isBaseline = group == _compareBaseline;
+            var head = new StackPanel();
+            var title = new StackPanel { Orientation = Orientation.Horizontal };
+            title.Children.Add(Swatch(GroupColor(group)));
+            title.Children.Add(new TextBlock
+            {
+                Text = group.Label, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("TxtPrimary"),
+                TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 140
+            });
+            head.Children.Add(title);
+
+            var sub = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+            sub.Children.Add(new TextBlock { Text = Loc.Format("BenchmarkRunsCount", group.Runs.Count) + " · ", Foreground = (Brush)FindResource("TxtMuted"), FontSize = 10.5 });
+            if (isBaseline)
+            {
+                sub.Children.Add(new TextBlock { Text = Loc.Get("BenchmarkBaseline"), Foreground = (Brush)FindResource("Accent"), FontSize = 10.5, FontWeight = FontWeights.SemiBold });
+            }
+            else
+            {
+                var make = new TextBlock
+                {
+                    Text = Loc.Get("BenchmarkMakeBaseline"), Foreground = (Brush)FindResource("TxtSecond"), FontSize = 10.5,
+                    TextDecorations = TextDecorations.Underline, Cursor = Cursors.Hand
+                };
+                make.MouseLeftButtonUp += (s, e) => { _compareBaselineLabel = group.Label; RenderBenchmarkCompare(); e.Handled = true; };
+                sub.Children.Add(make);
+            }
+            head.Children.Add(sub);
+
+            // Sürükle-bırak: başlığı tutup başka bir başlığın üstüne bırakınca o sıraya geçer
+            var border = new Border
+            {
+                Child = head, Padding = new Thickness(6, 4, 6, 6), Margin = new Thickness(-6, 0, 8, 6), CornerRadius = new CornerRadius(6),
+                Background = Brushes.Transparent, AllowDrop = true, Cursor = Cursors.SizeAll, ToolTip = Loc.Get("BenchmarkDragTip")
+            };
+            border.MouseMove += (s, e) =>
+            {
+                if (e.LeftButton == MouseButtonState.Pressed)
+                    DragDrop.DoDragDrop(border, group.Label, System.Windows.DragDropEffects.Move);
+            };
+            border.DragEnter += (s, e) => border.Background = (Brush)FindResource("BgHover");
+            border.DragLeave += (s, e) => border.Background = Brushes.Transparent;
+            border.Drop += (s, e) =>
+            {
+                border.Background = Brushes.Transparent;
+                if (e.Data.GetData(typeof(string)) is not string dragged) return;
+                var order = _compareGroups.Select(x => x.Label).ToList();
+                int from = order.FindIndex(x => string.Equals(x, dragged, StringComparison.CurrentCultureIgnoreCase));
+                int to = order.FindIndex(x => string.Equals(x, group.Label, StringComparison.CurrentCultureIgnoreCase));
+                if (from < 0 || to < 0 || from == to) return;
+                order.RemoveAt(from);
+                order.Insert(to, dragged);
+                _compareOrder.Clear();
+                _compareOrder.AddRange(order);
+                RenderBenchmarkCompare();
+            };
+            return border;
+        }
+
+        /// <summary>Üstte FPS, altta seçilen ölçü (varsayılan GPU sıcaklığı); iki ayrı ölçekte, alt alta.</summary>
+        private void RenderBenchmarkCharts()
+        {
+            _fpsChart ??= new ChartView(this, cvsBenchmarkFps, cvsBenchmarkFpsHover);
+            _metricChart ??= new ChartView(this, cvsBenchmarkChart, cvsBenchmarkHover);
+
+            if (cbBenchmarkChartMetric.Items.Count == 0)
+            {
+                foreach (var m in BenchmarkCompare.ChartMetrics.Where(m => m.Key != "Fps"))
+                    cbBenchmarkChartMetric.Items.Add(new ComboBoxItem { Content = Loc.Get("Chart" + m.Key), Tag = m });
+                cbBenchmarkChartMetric.SelectedIndex = 0;   // GPU sıcaklığı
+            }
+
+            // Lejant (2+ seri): renk işareti + etiket metin renginde
             spBenchmarkLegend.Children.Clear();
-            if (_compareGroups.Count < 2 || cbBenchmarkChartMetric.SelectedItem is not ComboBoxItem { Tag: ChartMetric metric }) return;
-
-            int warmup = _context.Config.BenchmarkWarmupSeconds;
-            _chartUnit = metric.Unit;
-            _chartSeries = _compareGroups.Select((g, i) => (g, BenchmarkCompare.Series(g, metric, warmup), SeriesColors[i])).ToList();
-
-            // Lejant her zaman (2+ seri): renk işareti + etiket metin renginde
-            foreach (var (group, _, color) in _chartSeries)
+            foreach (var g in _compareGroups)
             {
                 var item = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 16, 0) };
-                item.Children.Add(new System.Windows.Shapes.Rectangle
-                {
-                    Width = 14, Height = 3, RadiusX = 1.5, RadiusY = 1.5, Fill = BrushFrom(color),
-                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0)
-                });
-                item.Children.Add(new TextBlock { Text = group.Label, Foreground = (Brush)FindResource("TxtSecond"), FontSize = 11.5 });
+                item.Children.Add(Swatch(GroupColor(g)));
+                item.Children.Add(new TextBlock { Text = g.Label, Foreground = (Brush)FindResource("TxtSecond"), FontSize = 11.5 });
                 spBenchmarkLegend.Children.Add(item);
             }
 
-            var all = _chartSeries.SelectMany(x => x.Points).ToList();
-            double w = cvs.ActualWidth, h = cvs.ActualHeight;
-            if (all.Count == 0)
-            {
-                cvs.Children.Add(new TextBlock { Text = Loc.Get("BenchmarkChartNoData"), Foreground = (Brush)FindResource("TxtSecond") });
-                return;
-            }
-            if (w < 120 || h < 60) return;
+            int warmup = _context.Config.BenchmarkWarmupSeconds;
+            List<(string, List<(double, double)>, string)> Series(ChartMetric m)
+                => _compareGroups.Select(g => (g.Label, BenchmarkCompare.Series(g, m, warmup), GroupColor(g))).ToList();
 
-            _chartMinT = 0;
-            _chartMaxT = Math.Max(1, all.Max(p => p.T));
-            double lo = all.Min(p => p.Value), hi = all.Max(p => p.Value);
-            double pad = Math.Max((hi - lo) * 0.08, Math.Max(Math.Abs(hi) * 0.02, 1));
-            _chartMinV = Math.Max(0, lo - pad);
-            _chartMaxV = hi + pad;
-            _chartLeft = ChartPadLeft;
-            _chartTop = ChartPadTop;
-            _chartWidth = w - ChartPadLeft - ChartPadRight;
-            _chartHeight = h - ChartPadTop - ChartPadBottom;
-
-            var muted = (Brush)FindResource("TxtMuted");
-            var gridBrush = (Brush)FindResource("Border");
-
-            // Silik ızgara ve eksen etiketleri
-            for (int i = 0; i <= 3; i++)
-            {
-                double v = _chartMinV + (_chartMaxV - _chartMinV) * i / 3;
-                double y = Y(v);
-                cvs.Children.Add(new System.Windows.Shapes.Line { X1 = _chartLeft, X2 = _chartLeft + _chartWidth, Y1 = y, Y2 = y, Stroke = gridBrush, StrokeThickness = 1 });
-                var label = new TextBlock { Text = v.ToString(v >= 100 ? "0" : "0.#"), Foreground = muted, FontSize = 10 };
-                Canvas.SetLeft(label, 4);
-                Canvas.SetTop(label, y - 7);
-                cvs.Children.Add(label);
-            }
-            foreach (double t in new[] { 0, _chartMaxT / 2, _chartMaxT })
-            {
-                var label = new TextBlock { Text = FormatT(t), Foreground = muted, FontSize = 10 };
-                Canvas.SetLeft(label, X(t) - 12);
-                Canvas.SetTop(label, _chartTop + _chartHeight + 4);
-                cvs.Children.Add(label);
-            }
-
-            // Çizgiler (2 px) ve çizgi sonunda doğrudan etiket; etiketler çakışmasın diye dikeyde aralanır
-            var ends = new List<(double Y, string Text)>();
-            foreach (var (group, points, color) in _chartSeries)
-            {
-                if (points.Count == 0) continue;
-                var line = new System.Windows.Shapes.Polyline
-                {
-                    Stroke = BrushFrom(color), StrokeThickness = 2, StrokeLineJoin = PenLineJoin.Round
-                };
-                foreach (var (t, v) in points) line.Points.Add(new Point(X(t), Y(v)));
-                cvs.Children.Add(line);
-                ends.Add((Y(points[^1].Value), group.Label));
-            }
-            double lastY = double.MinValue;
-            foreach (var (y, text) in ends.OrderBy(e => e.Y))
-            {
-                double top = Math.Max(y - 7, lastY + 14);
-                lastY = top;
-                var label = new TextBlock
-                {
-                    Text = text, Foreground = (Brush)FindResource("TxtSecond"), FontSize = 10.5,
-                    MaxWidth = ChartPadRight - 10, TextTrimming = TextTrimming.CharacterEllipsis
-                };
-                Canvas.SetLeft(label, _chartLeft + _chartWidth + 8);
-                Canvas.SetTop(label, top);
-                cvs.Children.Add(label);
-            }
+            var fps = BenchmarkCompare.ChartMetrics.Single(m => m.Key == "Fps");
+            _fpsChart.Render(Series(fps), fps.Unit);
+            if (cbBenchmarkChartMetric.SelectedItem is ComboBoxItem { Tag: ChartMetric metric })
+                _metricChart.Render(Series(metric), metric.Unit);
         }
 
-        private double X(double t) => _chartLeft + (t - _chartMinT) / (_chartMaxT - _chartMinT) * _chartWidth;
-        private double Y(double v) => _chartTop + (1 - (v - _chartMinV) / (_chartMaxV - _chartMinV)) * _chartHeight;
-
-        private void CbBenchmarkChartMetric_SelectionChanged(object sender, SelectionChangedEventArgs e) => RenderBenchmarkChart();
-        private void CvsBenchmarkChart_SizeChanged(object sender, SizeChangedEventArgs e) => RenderBenchmarkChart();
-        private void CvsBenchmarkChart_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e) => cvsBenchmarkHover.Children.Clear();
-
-        /// <summary>Dikey çizgi + o saniyedeki değerler (en yakın örnek).</summary>
-        private void CvsBenchmarkChart_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        private void CbBenchmarkChartMetric_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            var hover = cvsBenchmarkHover;
-            hover.Children.Clear();
-            if (_chartSeries.Count == 0 || _chartWidth <= 0) return;
+            if (_compareGroups.Count >= 2) RenderBenchmarkCharts();
+        }
 
-            var pos = e.GetPosition(cvsBenchmarkChart);
-            if (pos.X < _chartLeft || pos.X > _chartLeft + _chartWidth) return;
-            double t = Math.Round(_chartMinT + (pos.X - _chartLeft) / _chartWidth * (_chartMaxT - _chartMinT));
-            double x = X(t);
+        /// <summary>
+        /// Tek bir çizgi grafiği: silik ızgara, 2 px çizgiler, çizgi sonunda etiket, fareyle dikey çizgi + değerler.
+        /// </summary>
+        private sealed class ChartView
+        {
+            private const double PadLeft = 46, PadRight = 110, PadTop = 8, PadBottom = 22;
 
-            hover.Children.Add(new System.Windows.Shapes.Line
+            private readonly MainWindow _w;
+            private readonly Canvas _cvs, _hover;
+            private List<(string Label, List<(double T, double V)> Points, string Color)> _series = new();
+            private string _unit = "";
+            private double _minT, _maxT, _minV, _maxV, _left, _top, _width, _height;
+
+            public ChartView(MainWindow w, Canvas cvs, Canvas hover)
             {
-                X1 = x, X2 = x, Y1 = _chartTop, Y2 = _chartTop + _chartHeight,
-                Stroke = (Brush)FindResource("TxtMuted"), StrokeThickness = 1
-            });
-
-            var tip = new StackPanel();
-            tip.Children.Add(new TextBlock { Text = FormatT(t), Foreground = (Brush)FindResource("TxtSecond"), FontSize = 10.5, Margin = new Thickness(0, 0, 0, 3) });
-            foreach (var (group, points, color) in _chartSeries)
-            {
-                if (points.Count == 0) continue;
-                var nearest = points.OrderBy(p => Math.Abs(p.T - t)).First();
-                if (Math.Abs(nearest.T - t) > 2) continue;
-
-                // 8 px işaret, zemin renginde 2 px halka
-                var dot = new System.Windows.Shapes.Ellipse
-                {
-                    Width = 8, Height = 8, Fill = BrushFrom(color), Stroke = (Brush)FindResource("BgCard"), StrokeThickness = 2
-                };
-                Canvas.SetLeft(dot, X(nearest.T) - 4);
-                Canvas.SetTop(dot, Y(nearest.Value) - 4);
-                hover.Children.Add(dot);
-
-                var row = new StackPanel { Orientation = Orientation.Horizontal };
-                row.Children.Add(new System.Windows.Shapes.Rectangle
-                {
-                    Width = 8, Height = 8, RadiusX = 2, RadiusY = 2, Fill = BrushFrom(color),
-                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0)
-                });
-                row.Children.Add(new TextBlock
-                {
-                    Text = $"{group.Label}: {nearest.Value.ToString(nearest.Value >= 100 ? "0" : "0.#")} {_chartUnit}",
-                    Foreground = (Brush)FindResource("TxtPrimary"), FontSize = 11.5
-                });
-                tip.Children.Add(row);
+                _w = w;
+                _cvs = cvs;
+                _hover = hover;
+                cvs.SizeChanged += (s, e) => Redraw();
+                cvs.MouseMove += OnMouseMove;
+                cvs.MouseLeave += (s, e) => _hover.Children.Clear();
             }
 
-            var box = new Border
+            private Brush Res(string key) => (Brush)_w.FindResource(key);
+            private double X(double t) => _left + (t - _minT) / (_maxT - _minT) * _width;
+            private double Y(double v) => _top + (1 - (v - _minV) / (_maxV - _minV)) * _height;
+            private static string FormatT(double t) => $"{(int)t / 60}:{(int)t % 60:00}";
+            private static string FormatV(double v) => v.ToString(v >= 100 ? "0" : "0.#");
+
+            public void Render(List<(string, List<(double, double)>, string)> series, string unit)
             {
-                Background = (Brush)FindResource("BgInput"), BorderBrush = (Brush)FindResource("Border"),
-                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 6, 8, 6), Child = tip
-            };
-            box.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
-            double left = x + 12;
-            if (left + box.DesiredSize.Width > cvsBenchmarkChart.ActualWidth) left = x - 12 - box.DesiredSize.Width;
-            Canvas.SetLeft(box, Math.Max(0, left));
-            Canvas.SetTop(box, _chartTop);
-            hover.Children.Add(box);
+                _series = series;
+                _unit = unit;
+                Redraw();
+            }
+
+            private void Redraw()
+            {
+                _cvs.Children.Clear();
+                _hover.Children.Clear();
+                var all = _series.SelectMany(s => s.Points).ToList();
+                double w = _cvs.ActualWidth, h = _cvs.ActualHeight;
+                if (all.Count == 0)
+                {
+                    _cvs.Children.Add(new TextBlock { Text = Loc.Get("BenchmarkChartNoData"), Foreground = Res("TxtSecond") });
+                    return;
+                }
+                if (w < 120 || h < 60) return;
+
+                _minT = 0;
+                _maxT = Math.Max(1, all.Max(p => p.T));
+                double lo = all.Min(p => p.V), hi = all.Max(p => p.V);
+                double pad = Math.Max((hi - lo) * 0.08, Math.Max(Math.Abs(hi) * 0.02, 1));
+                _minV = Math.Max(0, lo - pad);
+                _maxV = hi + pad;
+                _left = PadLeft;
+                _top = PadTop;
+                _width = w - PadLeft - PadRight;
+                _height = h - PadTop - PadBottom;
+
+                for (int i = 0; i <= 3; i++)
+                {
+                    double v = _minV + (_maxV - _minV) * i / 3, y = Y(v);
+                    _cvs.Children.Add(new System.Windows.Shapes.Line { X1 = _left, X2 = _left + _width, Y1 = y, Y2 = y, Stroke = Res("Border"), StrokeThickness = 1 });
+                    var label = new TextBlock { Text = FormatV(v), Foreground = Res("TxtMuted"), FontSize = 10 };
+                    Canvas.SetLeft(label, 4);
+                    Canvas.SetTop(label, y - 7);
+                    _cvs.Children.Add(label);
+                }
+                foreach (double t in new[] { 0, _maxT / 2, _maxT })
+                {
+                    var label = new TextBlock { Text = FormatT(t), Foreground = Res("TxtMuted"), FontSize = 10 };
+                    Canvas.SetLeft(label, X(t) - 12);
+                    Canvas.SetTop(label, _top + _height + 4);
+                    _cvs.Children.Add(label);
+                }
+
+                // Çizgiler ve çizgi sonunda doğrudan etiket (etiketler çakışmasın diye dikeyde aralanır)
+                var ends = new List<(double Y, string Text)>();
+                foreach (var (label, points, color) in _series)
+                {
+                    if (points.Count == 0) continue;
+                    var line = new System.Windows.Shapes.Polyline { Stroke = BrushFrom(color), StrokeThickness = 2, StrokeLineJoin = PenLineJoin.Round };
+                    foreach (var (t, v) in points) line.Points.Add(new Point(X(t), Y(v)));
+                    _cvs.Children.Add(line);
+                    ends.Add((Y(points[^1].V), $"{label} · {FormatV(points[^1].V)} {_unit}"));
+                }
+                double lastY = double.MinValue;
+                foreach (var (y, text) in ends.OrderBy(e => e.Y))
+                {
+                    double top = Math.Max(y - 7, lastY + 14);
+                    lastY = top;
+                    var label = new TextBlock { Text = text, Foreground = Res("TxtSecond"), FontSize = 10.5, MaxWidth = PadRight - 10, TextTrimming = TextTrimming.CharacterEllipsis };
+                    Canvas.SetLeft(label, _left + _width + 8);
+                    Canvas.SetTop(label, top);
+                    _cvs.Children.Add(label);
+                }
+            }
+
+            private void OnMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+            {
+                _hover.Children.Clear();
+                if (_series.Count == 0 || _width <= 0) return;
+                var pos = e.GetPosition(_cvs);
+                if (pos.X < _left || pos.X > _left + _width) return;
+                double t = Math.Round(_minT + (pos.X - _left) / _width * (_maxT - _minT));
+                double x = X(t);
+
+                _hover.Children.Add(new System.Windows.Shapes.Line { X1 = x, X2 = x, Y1 = _top, Y2 = _top + _height, Stroke = Res("TxtMuted"), StrokeThickness = 1 });
+
+                var tip = new StackPanel();
+                tip.Children.Add(new TextBlock { Text = FormatT(t), Foreground = Res("TxtSecond"), FontSize = 10.5, Margin = new Thickness(0, 0, 0, 3) });
+                foreach (var (label, points, color) in _series)
+                {
+                    if (points.Count == 0) continue;
+                    var nearest = points.OrderBy(p => Math.Abs(p.T - t)).First();
+                    if (Math.Abs(nearest.T - t) > 2) continue;
+
+                    // 8 px işaret, zemin renginde 2 px halka
+                    var dot = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, Fill = BrushFrom(color), Stroke = Res("BgCard"), StrokeThickness = 2 };
+                    Canvas.SetLeft(dot, X(nearest.T) - 4);
+                    Canvas.SetTop(dot, Y(nearest.V) - 4);
+                    _hover.Children.Add(dot);
+
+                    var row = new StackPanel { Orientation = Orientation.Horizontal };
+                    row.Children.Add(new System.Windows.Shapes.Rectangle { Width = 8, Height = 8, RadiusX = 2, RadiusY = 2, Fill = BrushFrom(color), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                    row.Children.Add(new TextBlock { Text = $"{label}: {FormatV(nearest.V)} {_unit}", Foreground = Res("TxtPrimary"), FontSize = 11.5 });
+                    tip.Children.Add(row);
+                }
+
+                var box = new Border { Background = Res("BgInput"), BorderBrush = Res("Border"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 6, 8, 6), Child = tip };
+                box.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                double left = x + 12;
+                if (left + box.DesiredSize.Width > _cvs.ActualWidth) left = x - 12 - box.DesiredSize.Width;
+                Canvas.SetLeft(box, Math.Max(0, left));
+                Canvas.SetTop(box, _top);
+                _hover.Children.Add(box);
+            }
         }
 
         /// <summary>Karşılaştırma tablosu + saniyelik veriler; bölge ayarına göre ayırıcı (Excel'de doğrudan açılır).</summary>
         private async void BtnBenchmarkExport_Click(object sender, RoutedEventArgs e)
         {
-            if (_compareGroups.Count < 2) return;
+            if (_compareGroups.Count < 2 || _compareBaseline == null) return;
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
                 Filter = "CSV (*.csv)|*.csv",
@@ -934,7 +1058,7 @@ namespace Warden
             {
                 var culture = System.Globalization.CultureInfo.CurrentCulture;
                 var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
-                string summary = BenchmarkCompare.SummaryCsv(_compareGroups, _context.Config.BenchmarkEfficiency,
+                string summary = BenchmarkCompare.SummaryCsv(_compareGroups, _compareBaseline, _context.Config.BenchmarkEfficiency,
                                                              key => key == "Metric" ? Loc.Get("CmpMetric") : MetricName(key), culture);
                 System.IO.File.WriteAllText(dialog.FileName, summary, utf8);
 
@@ -2462,6 +2586,7 @@ namespace Warden
             lblBenchmarkEfficiency.Text = Loc.Get("BenchmarkEfficiency");
             lblBenchmarkCompareSection.Text = Loc.Get("BenchmarkCompareSection");
             lblBenchmarkExport.Text     = Loc.Get("BenchmarkExport");
+            lblBenchmarkMetricChart.Text = Loc.Get("BenchmarkMetricChart");
             lblModuleBenchmark.Text     = Loc.Get("ModuleBenchmark");
             lblModuleBenchmarkDesc.Text = Loc.Get("ModuleBenchmarkDesc");
             lblBenchmarkHotkey.Text     = Loc.Get("BenchmarkHotkey");
