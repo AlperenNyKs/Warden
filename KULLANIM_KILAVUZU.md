@@ -74,6 +74,8 @@ dotnet run -c Release
    - Saniyede bir kaydedilir: FPS ve kare süresi (RTSS'ten — MSI Afterburner ile gelir, açık olmalı), CPU/GPU sıcaklığı, watt, frekans ve yük.
    - Özet: ilk 10 sn (ayarlanabilir) ısınma olarak atılır; ortalama FPS (kare sayısı ÷ süre), %1 low (kare sürelerinin 99. yüzdeliği), ortalama ve p95 sıcaklık, ortalama watt, MHz ve watt başına FPS (GPU / CPU / Toplam seçilebilir). RTSS kare kare veri veremezse %1 low saniyelik FPS'ten yaklaşık hesaplanır ve "≈" ile gösterilir.
    - Kayıtlar `%AppData%\Warden\benchmarks` klasöründedir. Adil karşılaştırma için aynı sahneyi en az 3–5 dakika test edin.
+   - **Karşılaştırma:** Listedeki kayıtları işaretleyin (en az iki farklı etiket). Aynı etiketli kayıtların ortalaması alınır; en eski grup temel kabul edilir. Tabloda her ölçünün değeri ve temele göre yüzde farkı yer alır (yeşil iyileşme, kırmızı kötüleşme; MHz ve yük yalnızca bilgi amaçlı). Altta seçilen ölçü (FPS, sıcaklık, watt, MHz) zamana göre üst üste çizilir; fareyle üzerine gelince o saniyedeki değerler görünür. En fazla 4 grup karşılaştırılır.
+   - **CSV dışa aktar:** Karşılaştırma tablosunu ve seçilen kayıtların saniyelik verilerini iki CSV dosyası olarak kaydeder (Excel'de doğrudan açılır).
 
 9. **Sistem Durumu (Durum):**
    - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir. Kapalı modüllerin bağımlılıkları "Modül kapalı" olarak gösterilir.

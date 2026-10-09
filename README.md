@@ -65,6 +65,8 @@ you played and how hot things got. Everything is modular: turn off what you don'
   and load every second.
 - Summary after a warm-up: average FPS, 1% low (from real frame times), average / p95 temperatures, average MHz and
   watts, and FPS per watt (GPU, CPU or total).
+- **Compare:** tick runs to group them by label, see the values side by side with % differences against the oldest
+  group, overlay FPS / temperature / power / clock over time, and export everything to CSV.
 
 ### 🧩 Modular by design
 - Turn each module off in **Settings → Modules**. A module that is off does no background work at all: with Sonar off
