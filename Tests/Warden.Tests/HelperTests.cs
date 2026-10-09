@@ -674,3 +674,42 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class BenchmarkClockRangeTests
+    {
+        [Fact]
+        public void ClockMinMax_IgnoreWarmupAndMissingValues()
+        {
+            var run = new BenchmarkRun
+            {
+                Id = "c", Label = "A", DurationSeconds = 5,
+                Samples =
+                {
+                    new BenchmarkSample { T = 1, GpuClock = 300, CpuClock = 800 },    // ısınma: boost'a çıkış
+                    new BenchmarkSample { T = 2, GpuClock = 1605, CpuClock = 4200 },
+                    new BenchmarkSample { T = 3, GpuClock = 1515, CpuClock = 3900 },
+                    new BenchmarkSample { T = 4, GpuClock = null, CpuClock = 4000 },  // okunamadı
+                    new BenchmarkSample { T = 5, GpuClock = 1560, CpuClock = 4100 },
+                }
+            };
+
+            var s = BenchmarkStats.Compute(run, warmupSeconds: 1);
+
+            Assert.Equal(1515, s.MinGpuClock);
+            Assert.Equal(1605, s.MaxGpuClock);
+            Assert.Equal(1560, s.AvgGpuClock);
+            Assert.Equal(3900, s.MinCpuClock);
+            Assert.Equal(4200, s.MaxCpuClock);
+        }
+
+        [Fact]
+        public void CompareTable_HasClockMinMaxRows()
+        {
+            var keys = BenchmarkCompare.Metrics.Select(m => m.Key).ToList();
+            Assert.Equal(new[] { "GpuClock", "GpuClockMin", "GpuClockMax", "CpuClock", "CpuClockMin", "CpuClockMax" },
+                         keys.Where(k => k.Contains("Clock")));
+        }
+    }
+}
