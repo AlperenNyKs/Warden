@@ -69,15 +69,21 @@ dotnet run -c Release
    - **Disk alanı:** Kurulu oyunlar boyutlarıyla, en büyük önce listelenir. 60 gündür oynanmayan veya Steam'de hiç açılmamış oyunlar renkli gösterilir; böylece yer açmak için neyin silinebileceği görülür. Son oynama Steam oyunlarında Steam'in kendi kaydından, diğer mağazalarda Warden geçmişinden gelir (kayıt yoksa "Bilinmiyor"). Altta oyun sürücülerinin boş alanı yazar.
    - Oyunların kurulu olduğu bir sürücüde boş alan %10'un altına düşerse açılış taramasından sonra bildirim gelir (günde en fazla bir kez).
 
-8. **Sistem Durumu (Durum):**
+8. **Benchmark (Ayarlar → Modüller → Benchmark / Karşılaştırma; varsayılan kapalı):**
+   - Ayarları (ör. Afterburner profili) siz değiştirirsiniz, Warden ölçer. Kaydı Benchmark sayfasındaki butonla ya da oyunun içinden **Ctrl+Shift+F10** ile başlatıp durdurun (tuş Ayarlar'dan F9–F12 seçilebilir). Kayda etiket verebilirsiniz; boşsa "Kayıt N" olur, sonradan listede tıklayıp değiştirilebilir.
+   - Saniyede bir kaydedilir: FPS ve kare süresi (RTSS'ten — MSI Afterburner ile gelir, açık olmalı), CPU/GPU sıcaklığı, watt, frekans ve yük.
+   - Özet: ilk 10 sn (ayarlanabilir) ısınma olarak atılır; ortalama FPS (kare sayısı ÷ süre), %1 low (kare sürelerinin 99. yüzdeliği), ortalama ve p95 sıcaklık, ortalama watt, MHz ve watt başına FPS (GPU / CPU / Toplam seçilebilir). RTSS kare kare veri veremezse %1 low saniyelik FPS'ten yaklaşık hesaplanır ve "≈" ile gösterilir.
+   - Kayıtlar `%AppData%\Warden\benchmarks` klasöründedir. Adil karşılaştırma için aynı sahneyi en az 3–5 dakika test edin.
+
+9. **Sistem Durumu (Durum):**
    - İlk açılışta otomatik gelir. SteelSeries GG / Sonar, MSI Afterburner, PawnIO, ekran kartı ve kurulum konumunu kontrol eder; eksik olan için "İndir" butonu gösterir. Kapalı modüllerin bağımlılıkları "Modül kapalı" olarak gösterilir.
 
-9. **Modüller (Ayarlar → Modüller):**
+10. **Modüller (Ayarlar → Modüller):**
    - Kullanmadığınız özellikleri kapatabilirsiniz: **Sonar profil geçişi**, **Ses cihazı denetleyicisi**, **Donanım izleme** (sensörler, sıcaklık alarmı, CSV kaydı) ve **GPU / Afterburner profili**.
    - Kapalı modül arka planda hiç çalışmaz: Sonar kapalıyken GG'ye bağlanılmaz, donanım izleme kapalıyken sensör sürücüsü yüklenmez. Sayfası menüde soluk görünür; açmak için sayfadaki **"Modülü aç"** butonunu kullanabilirsiniz.
    - Sonar kapalıyken de oyun takibi sürer: Panel'deki aktif oyun ve oyun açılınca otomatik CSV kaydı çalışmaya devam eder.
    - GPU profili saat hızını sensörlerden okuduğu için donanım izleme açık olmalıdır.
    - Her modülün kendi ayarları kendi kartındadır (ör. oyun kontrol sıklığı ve oyun taraması Sonar kartında, sıcaklık alarmı Donanım izleme kartında); modül kapalıyken bu ayarlar gizlenir. Ayarlar anında kaydedilir, ayrı bir "Kaydet" butonu yoktur.
 
-10. **Kapatma:**
+11. **Kapatma:**
    - Sistem tepsisindeki kalkan ikonuna sağ tıklayıp **"Çıkış"** (İngilizcede "Exit") diyerek tamamen kapatabilirsiniz. Pencereyi çarpıdan (X) kapatmak uygulamayı kapatmaz, tepside sessizce korumaya devam eder.

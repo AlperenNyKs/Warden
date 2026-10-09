@@ -204,6 +204,7 @@ namespace Warden
             => ShowPage("settings");
 
         private void BtnNavHistory_Click(object sender, RoutedEventArgs e) => ShowPage("history");
+        private void BtnNavBenchmark_Click(object sender, RoutedEventArgs e) => ShowPage("benchmark");
 
         private void BtnNavStatus_Click(object sender, RoutedEventArgs e)
             => ShowPage("status");
@@ -240,6 +241,7 @@ namespace Warden
             "devices"   => "devices",
             "gpu"       => "gpu",
             "telemetry" => "hardware",
+            "benchmark" => "benchmark",
             _           => null
         };
 
@@ -249,6 +251,7 @@ namespace Warden
             "devices"  => _context.Config.ModuleAudioDevices,
             "hardware" => _context.Config.ModuleHardware,
             "gpu"      => _context.Config.GpuProfileActive,
+            "benchmark" => _context.Config.ModuleBenchmark,
             _          => true
         };
 
@@ -261,6 +264,7 @@ namespace Warden
                 (btnNavDevice,    pageDeviceManager, "devices"),
                 (btnNavGpu,       pageGpuMonitor,    "gpu"),
                 (btnNavTelemetry, pageTelemetry,     "hardware"),
+                (btnNavBenchmark, pageBenchmark,     "benchmark"),
             };
             foreach (var (nav, page, module) in modulePages)
             {
@@ -293,6 +297,7 @@ namespace Warden
                 case "devices":  cfg.ModuleAudioDevices = true; break;
                 case "hardware": cfg.ModuleHardware = true; break;
                 case "gpu":      cfg.ModuleGpuProfile = true; cfg.ModuleHardware = true; break;
+                case "benchmark": cfg.ModuleBenchmark = true; break;
                 default: return;
             }
             _context.SaveConfig();
@@ -478,6 +483,225 @@ namespace Warden
             };
         }
 
+        // ══════════════════════════════════════════════════════════════
+        //  Benchmark page
+        // ══════════════════════════════════════════════════════════════
+
+        // Sayfa açıkken saniyede bir: canlı durum (geçen süre, FPS)
+        private readonly System.Windows.Threading.DispatcherTimer _benchmarkTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+        private bool _benchmarkTimerHooked;
+        private static readonly int[] WarmupChoices = { 0, 5, 10, 15, 30, 60 };
+
+        private void PopulateBenchmarkSettings()
+        {
+            var cfg = _context.Config;
+            cbBenchmarkHotkey.Items.Clear();
+            foreach (var key in GlobalHotkey.Choices)
+            {
+                var item = new ComboBoxItem { Content = "Ctrl+Shift+" + key, Tag = key.ToString() };
+                cbBenchmarkHotkey.Items.Add(item);
+                if (key.ToString() == cfg.BenchmarkHotkey) cbBenchmarkHotkey.SelectedItem = item;
+            }
+
+            cbBenchmarkWarmup.Items.Clear();
+            foreach (int sec in WarmupChoices.Union(new[] { cfg.BenchmarkWarmupSeconds }).OrderBy(x => x))
+            {
+                var item = new ComboBoxItem { Content = Loc.Format("Seconds", sec), Tag = sec };
+                cbBenchmarkWarmup.Items.Add(item);
+                if (sec == cfg.BenchmarkWarmupSeconds) cbBenchmarkWarmup.SelectedItem = item;
+            }
+
+            cbBenchmarkEfficiency.Items.Clear();
+            foreach (var (basis, key) in new[] { (EfficiencyBasis.Gpu, "EffGpu"), (EfficiencyBasis.Cpu, "EffCpu"), (EfficiencyBasis.Total, "EffTotal") })
+            {
+                var item = new ComboBoxItem { Content = Loc.Get(key), Tag = basis };
+                cbBenchmarkEfficiency.Items.Add(item);
+                if (basis == cfg.BenchmarkEfficiency) cbBenchmarkEfficiency.SelectedItem = item;
+            }
+            UpdateBenchmarkHotkeyStatus();
+        }
+
+        /// <summary>Kısayol başka bir uygulamada kayıtlıysa ayarlarda kırmızı uyarı.</summary>
+        private void UpdateBenchmarkHotkeyStatus()
+        {
+            bool taken = _context.HotkeyRegistered == false;
+            lblBenchmarkHotkeyDesc.Text = taken
+                ? Loc.Format("BenchmarkHotkeyTaken", "Ctrl+Shift+" + _context.Config.BenchmarkHotkey)
+                : Loc.Get("BenchmarkHotkeyDesc");
+            lblBenchmarkHotkeyDesc.Foreground = (Brush)FindResource(taken ? "AccentRed" : "TxtSecond");
+        }
+
+        /// <summary>Kayıt başlayınca / bitince tepsi çağırır.</summary>
+        public void RefreshBenchmarks()
+        {
+            if (_currentPage == "benchmark") RenderBenchmarks();
+        }
+
+        private void RenderBenchmarks()
+        {
+            if (!_benchmarkTimerHooked)
+            {
+                _benchmarkTimer.Tick += (s, e) => UpdateBenchmarkStatus();
+                _benchmarkTimerHooked = true;
+            }
+            if (txtBenchmarkLabel.Text != _context.NextBenchmarkLabel) txtBenchmarkLabel.Text = _context.NextBenchmarkLabel;
+            UpdateBenchmarkStatus();
+
+            var basis = _context.Config.BenchmarkEfficiency;
+            int warmup = _context.Config.BenchmarkWarmupSeconds;
+            spBenchmarkRuns.Children.Clear();
+            var runs = _context.Benchmarks.LoadAll();
+            if (runs.Count == 0)
+            {
+                spBenchmarkRuns.Children.Add(new TextBlock
+                {
+                    Text = Loc.Get("BenchmarkNoRuns"),
+                    Foreground = (Brush)FindResource("TxtSecond"),
+                    Margin = new Thickness(0, 12, 0, 12)
+                });
+                return;
+            }
+            for (int i = 0; i < runs.Count; i++)
+                spBenchmarkRuns.Children.Add(BuildBenchmarkRow(runs[i], BenchmarkStats.Compute(runs[i], warmup), basis, first: i == 0));
+        }
+
+        private void UpdateBenchmarkStatus()
+        {
+            string hotkey = "Ctrl+Shift+" + _context.Config.BenchmarkHotkey;
+            var live = _context.Benchmark.Live;
+            lblBenchmarkToggle.Text = Loc.Get(live != null ? "BenchmarkStop" : "BenchmarkStart");
+            txtBenchmarkHint.Text = Loc.Format("BenchmarkHint", _context.Config.BenchmarkWarmupSeconds);
+
+            if (live is (string app, var fps, TimeSpan elapsed))
+            {
+                txtBenchmarkStatus.Text = Loc.Format("BenchmarkRecording", elapsed.ToString(@"mm\:ss"),
+                    string.IsNullOrEmpty(app) ? "–" : app, fps is double f ? Math.Round(f).ToString() : "–");
+                txtBenchmarkStatus.Foreground = (Brush)FindResource("Accent");
+            }
+            else if (RtssReader.ReadApps().Count == 0)
+            {
+                txtBenchmarkStatus.Text = Loc.Get("BenchmarkNoRtss");
+                txtBenchmarkStatus.Foreground = (Brush)FindResource("AccentRed");
+            }
+            else
+            {
+                txtBenchmarkStatus.Text = Loc.Format("BenchmarkReady", hotkey);
+                txtBenchmarkStatus.Foreground = (Brush)FindResource("TxtPrimary");
+            }
+        }
+
+        private void TxtBenchmarkLabel_TextChanged(object sender, TextChangedEventArgs e)
+            => _context.NextBenchmarkLabel = txtBenchmarkLabel.Text;
+
+        private void BtnBenchmarkToggle_Click(object sender, RoutedEventArgs e)
+        {
+            _context.ToggleBenchmark();
+            UpdateBenchmarkStatus();
+        }
+
+        private void CbBenchmarkEfficiency_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isPopulatingControls || cbBenchmarkEfficiency.SelectedItem is not ComboBoxItem { Tag: EfficiencyBasis basis }) return;
+            if (basis == _context.Config.BenchmarkEfficiency) return;
+            _context.Config.BenchmarkEfficiency = basis;
+            _context.SaveConfig();
+            RenderBenchmarks();
+        }
+
+        private static string Num(double? v, string format = "0") => v is double d ? d.ToString(format) : "–";
+
+        private UIElement BuildBenchmarkRow(BenchmarkRun run, BenchmarkSummary sum, EfficiencyBasis basis, bool first)
+        {
+            var secondary = (Brush)FindResource("TxtSecond");
+            var panel = new StackPanel();
+
+            // Etiket: yerinde düzenlenir (Enter veya odak kaybı kaydeder)
+            var header = new StackPanel { Orientation = Orientation.Horizontal };
+            var label = new System.Windows.Controls.TextBox
+            {
+                Text = run.Label,
+                FontWeight = FontWeights.SemiBold,
+                FontSize = 13,
+                Foreground = (Brush)FindResource("TxtPrimary"),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                MinWidth = 60,
+                ToolTip = Loc.Get("BenchmarkRenameTip")
+            };
+            void Commit()
+            {
+                string text = label.Text.Trim();
+                if (text.Length == 0) { label.Text = run.Label; return; }
+                if (text == run.Label) return;
+                _context.Benchmarks.Rename(run, text);
+            }
+            label.LostFocus += (s, e) => Commit();
+            label.KeyDown += (s, e) => { if (e.Key == Key.Enter) { Commit(); Keyboard.ClearFocus(); } };
+            header.Children.Add(label);
+
+            string meta = string.Join(" · ", new[]
+            {
+                run.Game, run.StartUtc.ToLocalTime().ToString("g"), Loc.Duration(TimeSpan.FromSeconds(run.DurationSeconds))
+            }.Where(x => !string.IsNullOrEmpty(x)));
+            header.Children.Add(new TextBlock { Text = "  " + meta, Foreground = secondary, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center });
+            panel.Children.Add(header);
+
+            TextBlock Line(string text, Brush? brush = null, double size = 12) => new()
+            {
+                Text = text, Foreground = brush ?? secondary, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0)
+            };
+
+            if (sum.MeasuredSeconds <= 0)
+            {
+                panel.Children.Add(Line(Loc.Get("BenchmarkRunShort")));
+            }
+            else
+            {
+                string low = (sum.Low1Approximate ? "≈ " : "") + Num(sum.Low1Fps);
+                panel.Children.Add(Line(Loc.Format("BenchmarkRunFps", Num(sum.AvgFps), low), (Brush)FindResource("TxtPrimary"), 13));
+                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "GPU", Num(sum.AvgGpuClock), Num(sum.AvgGpuTemp), Num(sum.P95GpuTemp),
+                                                   Num(sum.AvgGpuPower, "0.0"), Num(sum.AvgGpuLoad))));
+                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "CPU", Num(sum.AvgCpuClock), Num(sum.AvgCpuTemp), Num(sum.P95CpuTemp),
+                                                   Num(sum.AvgCpuPower, "0.0"), Num(sum.AvgCpuLoad))));
+                string basisName = Loc.Get(basis switch { EfficiencyBasis.Gpu => "EffGpu", EfficiencyBasis.Cpu => "EffCpu", _ => "EffTotal" });
+                panel.Children.Add(Line(Loc.Format("BenchmarkRunEfficiency", Num(sum.FpsPerWatt(basis), "0.00"), basisName),
+                                        (Brush)FindResource("Accent")));
+            }
+
+            var delete = new Button
+            {
+                Content = "🗑",
+                Style = (Style)FindResource("DangerButton"),
+                Padding = new Thickness(10, 5, 10, 5),
+                VerticalAlignment = VerticalAlignment.Top,
+                Cursor = Cursors.Hand,
+                ToolTip = Loc.Get("BenchmarkDelete")
+            };
+            delete.Click += (s, e) =>
+            {
+                if (MessageBox.Show(Loc.Format("BenchmarkDeleteConfirm", run.Label), "Warden",
+                                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                _context.Benchmarks.Delete(run.Id);
+                RenderBenchmarks();
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.Children.Add(panel);
+            Grid.SetColumn(delete, 1);
+            grid.Children.Add(delete);
+
+            return new Border
+            {
+                BorderBrush = (Brush)FindResource("Border"),
+                BorderThickness = new Thickness(0, first ? 0 : 1, 0, 0),
+                Padding = new Thickness(0, 12, 0, 12),
+                Child = grid
+            };
+        }
+
         /// <summary>Arka plan taraması oyun listesini/kuralları değiştirince tepsi çağırır.</summary>
         public void RefreshGameList() => RenderRulesList();
 
@@ -505,6 +729,7 @@ namespace Warden
                 ("gpu",       pageGpuMonitor,    rectGpuActive,       btnNavGpu),
                 ("telemetry", pageTelemetry,     rectTelemetryActive, btnNavTelemetry),
                 ("history",   pageHistory,       rectHistoryActive,   btnNavHistory),
+                ("benchmark", pageBenchmark,     rectBenchmarkActive, btnNavBenchmark),
                 ("status",    pageStatus,        rectStatusActive,    btnNavStatus),
                 ("settings",  pageSettings,      rectSettingsActive,  btnNavSettings),
             };
@@ -525,6 +750,8 @@ namespace Warden
             }
             if (page == "status") _ = RunStatusChecksAsync();
             if (page == "history") RenderHistory();
+            if (page == "benchmark") RenderBenchmarks();
+            if (page == "benchmark") _benchmarkTimer.Start(); else _benchmarkTimer.Stop();
 
             ApplyPageTelemetryDemand();
         }
@@ -546,6 +773,8 @@ namespace Warden
                 chkModuleAudioDevices.IsChecked = _context.Config.ModuleAudioDevices;
                 chkModuleHardware.IsChecked = _context.Config.ModuleHardware;
                 chkModuleGpuProfile.IsChecked = _context.Config.ModuleGpuProfile;
+                chkModuleBenchmark.IsChecked = _context.Config.ModuleBenchmark;
+                PopulateBenchmarkSettings();
                 chkTempAlarm.IsChecked = _context.Config.TempAlarmEnabled;
                 chkSessionSummary.IsChecked = _context.Config.SessionSummaryEnabled;
                 txtCpuTempLimit.Text = _context.Config.CpuTempLimit.ToString();
@@ -991,6 +1220,9 @@ namespace Warden
             _context.Config.ModuleAudioDevices = chkModuleAudioDevices.IsChecked == true;
             _context.Config.ModuleHardware = chkModuleHardware.IsChecked == true;
             _context.Config.ModuleGpuProfile = chkModuleGpuProfile.IsChecked == true;
+            _context.Config.ModuleBenchmark = chkModuleBenchmark.IsChecked == true;
+            if (cbBenchmarkHotkey.SelectedItem is ComboBoxItem hk) _context.Config.BenchmarkHotkey = (string)hk.Tag;
+            if (cbBenchmarkWarmup.SelectedItem is ComboBoxItem wu) _context.Config.BenchmarkWarmupSeconds = (int)wu.Tag;
             _context.Config.TempAlarmEnabled = chkTempAlarm.IsChecked == true;
             _context.Config.SessionSummaryEnabled = chkSessionSummary.IsChecked == true;
             ApplyTempLimitsFromUi();
@@ -1004,6 +1236,7 @@ namespace Warden
             if (_context.Config.ModuleSonar) RefreshPresetsIfNeeded();
             else ShowSonarModuleOff();
             ApplyModuleState();
+            UpdateBenchmarkHotkeyStatus();
         }
 
         private void Setting_Changed(object sender, RoutedEventArgs e) 
@@ -1866,6 +2099,17 @@ namespace Warden
             lblNavTelemetry.Text        = Loc.Get("NavShortSensors");
             lblNavStatus.Text           = Loc.Get("NavShortStatus");
             lblNavHistory.Text          = Loc.Get("NavShortHistory");
+            lblNavBenchmark.Text        = Loc.Get("NavShortBenchmark");
+            lblBenchmarkHeader.Text     = Loc.Get("BenchmarkHeader");
+            lblBenchmarkDesc.Text       = Loc.Get("BenchmarkDesc");
+            lblBenchmarkLabel.Text      = Loc.Get("BenchmarkLabelCaption");
+            lblBenchmarkRunsSection.Text = Loc.Get("BenchmarkRunsSection");
+            lblBenchmarkEfficiency.Text = Loc.Get("BenchmarkEfficiency");
+            lblModuleBenchmark.Text     = Loc.Get("ModuleBenchmark");
+            lblModuleBenchmarkDesc.Text = Loc.Get("ModuleBenchmarkDesc");
+            lblBenchmarkHotkey.Text     = Loc.Get("BenchmarkHotkey");
+            lblBenchmarkWarmup.Text     = Loc.Get("BenchmarkWarmup");
+            lblBenchmarkWarmupDesc.Text = Loc.Get("BenchmarkWarmupDesc");
             lblHistoryHeader.Text       = Loc.Get("HistoryHeader");
             lblHistoryDesc.Text         = Loc.Get("HistoryDesc");
             txtHistoryEmpty.Text        = Loc.Get("HistoryEmpty");

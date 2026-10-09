@@ -15,6 +15,12 @@ namespace Warden
         public bool ModuleAudioDevices { get; set; } = true; // ses cihazı denetleyicisi
         public bool ModuleHardware { get; set; } = true;     // sensörler, sıcaklık alarmı, CSV kaydı
         public bool ModuleGpuProfile { get; set; } = true;   // Afterburner profil geçişi (ModuleHardware gerekir)
+        public bool ModuleBenchmark { get; set; } = false;   // kayıt/karşılaştırma; global kısayol tuşu aldığı için varsayılan kapalı
+
+        // Benchmark: Ctrl+Shift+<tuş> (F9–F12), baştan atılan ısınma süresi ve "watt başına FPS" tabanı
+        public string BenchmarkHotkey { get; set; } = "F10";
+        public int BenchmarkWarmupSeconds { get; set; } = 10;
+        public EfficiencyBasis BenchmarkEfficiency { get; set; } = EfficiencyBasis.Gpu;
 
         /// <summary>GPU profili sensörlerden saat hızını okur; donanım izleme kapalıysa çalışamaz.</summary>
         [System.Text.Json.Serialization.JsonIgnore]
@@ -122,6 +128,7 @@ namespace Warden
             if (double.IsNaN(TargetMhz) || double.IsInfinity(TargetMhz) || TargetMhz < 0) TargetMhz = 0;
             CpuTempLimit = Math.Clamp(CpuTempLimit, MinTempLimit, MaxTempLimit);
             GpuTempLimit = Math.Clamp(GpuTempLimit, MinTempLimit, MaxTempLimit);
+            BenchmarkWarmupSeconds = Math.Clamp(BenchmarkWarmupSeconds, 0, 120);
         }
 
         /// <summary>

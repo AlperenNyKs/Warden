@@ -66,6 +66,7 @@ namespace Warden
         public double CoreClockMhz { get; set; }
         public int TemperatureCelsius { get; set; }
         public int UsagePercentage { get; set; }
+        public float? PowerWatts { get; set; }
     }
 
     public class TelemetrySnapshot
@@ -75,6 +76,10 @@ namespace Warden
         public GpuData? PrimaryGpu { get; set; }
         /// <summary>CPU paket/Tctl sıcaklığı (°C); okunamıyorsa null (ör. PawnIO kurulu değil).</summary>
         public float? CpuTemperature { get; set; }
+        /// <summary>CPU paket gücü (W), en yüksek çekirdek saati (MHz) ve toplam yük (%); okunamıyorsa null.</summary>
+        public float? CpuPowerWatts { get; set; }
+        public float? CpuClockMhz { get; set; }
+        public float? CpuLoadPercent { get; set; }
         /// <summary>LibreHardwareMonitor açıldı ve en az bir tarama yapıldı.</summary>
         public bool HardwareReady { get; set; }
         public List<TelemetrySensorItem> Favorites { get; set; } = new();
@@ -483,8 +488,18 @@ namespace Warden
                 },
                 CoreClockMhz = Read(SensorType.Clock) ?? 0,
                 TemperatureCelsius = (int)Math.Round(Read(SensorType.Temperature) ?? 0),
-                UsagePercentage = (int)Math.Round(Read(SensorType.Load) ?? 0)
+                UsagePercentage = (int)Math.Round(Read(SensorType.Load) ?? 0),
+                // Kart gücü: NVIDIA/AMD "GPU Package", Intel "GPU Power"; yoksa ilk güç sensörü
+                PowerWatts = ReadPower(gpu)
             };
+        }
+
+        private static float? ReadPower(IHardware gpu)
+        {
+            var power = gpu.Sensors.Where(s => s.SensorType == SensorType.Power).ToList();
+            return (power.FirstOrDefault(s => s.Name.Equals("GPU Package", StringComparison.OrdinalIgnoreCase)) ??
+                    power.FirstOrDefault(s => s.Name.Equals("GPU Power", StringComparison.OrdinalIgnoreCase)) ??
+                    power.FirstOrDefault())?.Value;
         }
 
         private void ProcessHardwareSensors(IHardware hardware, string hardwareName)
@@ -850,12 +865,16 @@ namespace Warden
                 };
 
                 var cpuTemp = _sensors.Values.FirstOrDefault(x => x.Category == "CPU" && x.SensorType == SensorType.Temperature);
+                float? Cpu(SensorType type) => _sensors.Values.FirstOrDefault(x => x.Category == "CPU" && x.SensorType == type)?.Value;
 
                 snapshot = new TelemetrySnapshot
                 {
                     Timestamp = DateTime.Now,
                     PrimaryGpu = _primaryGpu,
                     CpuTemperature = cpuTemp?.Value,
+                    CpuPowerWatts = Cpu(SensorType.Power),
+                    CpuClockMhz = Cpu(SensorType.Clock),
+                    CpuLoadPercent = Cpu(SensorType.Load),
                     HardwareReady = _isInitialized,
                     Favorites = favs,
                     GraphSensors = graphs,

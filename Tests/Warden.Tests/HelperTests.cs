@@ -425,3 +425,157 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class BenchmarkTests
+    {
+        private static BenchmarkRun Run(float[] frames, params BenchmarkSample[] samples) => new()
+        {
+            Id = "t", Label = "A", DurationSeconds = samples.Length, FrameTimesMs = frames, Samples = samples.ToList()
+        };
+
+        [Fact]
+        public void AvgFps_IsFramesOverTime_NotMeanOfFps()
+        {
+            // 1 sn: 100 kare × 5 ms + 1 sn: 10 kare × 100 ms → 110 kare / 1.5 sn
+            var frames = Enumerable.Repeat(5f, 100).Concat(Enumerable.Repeat(100f, 10)).ToArray();
+            var s = BenchmarkStats.Compute(Run(frames), warmupSeconds: 0);
+            Assert.Equal(110 / 1.5, s.AvgFps!.Value, 6);
+            Assert.False(s.Low1Approximate);
+        }
+
+        [Fact]
+        public void Low1_IsThe99thPercentileFrameTime()
+        {
+            var frames = Enumerable.Repeat(10f, 99).Append(50f).ToArray();   // 100 kare, en kötü %1 = 50 ms
+            var s = BenchmarkStats.Compute(Run(frames), 0);
+            Assert.Equal(1000.0 / 10, s.Low1Fps!.Value, 6);                    // nearest-rank: 99. kare 10 ms
+            var worse = Enumerable.Repeat(10f, 98).Concat(new[] { 50f, 50f }).ToArray();
+            Assert.Equal(1000.0 / 50, BenchmarkStats.Compute(Run(worse), 0).Low1Fps!.Value, 6);
+        }
+
+        [Fact]
+        public void Warmup_DropsFramesAndSamplesFromTheStart()
+        {
+            // İlk 1 sn: 10 kare × 100 ms (yükleme), sonra 200 kare × 5 ms
+            var frames = Enumerable.Repeat(100f, 10).Concat(Enumerable.Repeat(5f, 200)).ToArray();
+            var run = Run(frames,
+                new BenchmarkSample { T = 1, GpuTemp = 40 },
+                new BenchmarkSample { T = 2, GpuTemp = 70 },
+                new BenchmarkSample { T = 3, GpuTemp = 80 });
+
+            var s = BenchmarkStats.Compute(run, warmupSeconds: 1);
+            Assert.Equal(200.0, s.AvgFps!.Value, 6);
+            Assert.Equal(75.0, s.AvgGpuTemp!.Value, 6);    // T=1 atıldı
+            Assert.Equal(2.0, s.MeasuredSeconds, 6);
+        }
+
+        [Fact]
+        public void WithoutFrameTimes_FallsBackToPerSecondFps_MarkedApproximate()
+        {
+            var run = Run(Array.Empty<float>(),
+                new BenchmarkSample { T = 1, Fps = 100 }, new BenchmarkSample { T = 2, Fps = 60 }, new BenchmarkSample { T = 3, Fps = 140 });
+            var s = BenchmarkStats.Compute(run, 0);
+            Assert.True(s.Low1Approximate);
+            Assert.Equal(100.0, s.AvgFps!.Value, 6);
+            Assert.Equal(60.0, s.Low1Fps!.Value, 6);
+        }
+
+        [Fact]
+        public void TempP95_AndFpsPerWatt()
+        {
+            var samples = Enumerable.Range(1, 20).Select(i => new BenchmarkSample
+            {
+                T = i, CpuTemp = 60 + i, CpuPower = 40, GpuPower = 100
+            }).ToArray();
+            var s = BenchmarkStats.Compute(Run(Enumerable.Repeat(10f, 2000).ToArray(), samples), 0);   // 100 FPS
+
+            Assert.Equal(79.0, s.P95CpuTemp!.Value, 6);          // 20 değer: 19. sıra
+            Assert.Equal(1.0, s.FpsPerWatt(EfficiencyBasis.Gpu)!.Value, 6);
+            Assert.Equal(2.5, s.FpsPerWatt(EfficiencyBasis.Cpu)!.Value, 6);
+            Assert.Equal(100.0 / 140, s.FpsPerWatt(EfficiencyBasis.Total)!.Value, 6);
+        }
+
+        [Fact]
+        public void FpsPerWatt_NullWhenPowerUnknown()
+        {
+            var s = BenchmarkStats.Compute(Run(new[] { 10f, 10f }, new BenchmarkSample { T = 1 }), 0);
+            Assert.Null(s.FpsPerWatt(EfficiencyBasis.Gpu));
+        }
+
+        private static uint[] Buffer(params (int idx, uint us)[] values)
+        {
+            var b = new uint[RtssReader.FrameTimeBufLength];
+            foreach (var (i, v) in values) b[i] = v;
+            return b;
+        }
+
+        [Fact]
+        public void Collector_FirstReadIsEmpty_ThenReturnsNewFramesInOrder()
+        {
+            var c = new FrameTimeCollector();
+            Assert.Empty(c.Collect(2, Buffer((0, 10000), (1, 11000))));
+            var fresh = c.Collect(5, Buffer((0, 10000), (1, 11000), (2, 12000), (3, 13000), (4, 14000)));
+            Assert.Equal(new[] { 12f, 13f, 14f }, fresh);
+        }
+
+        [Fact]
+        public void Collector_HandlesWrapAroundAsRingIndex()
+        {
+            var c = new FrameTimeCollector();
+            c.Collect(1022, Buffer());
+            var fresh = c.Collect(2, Buffer((1022, 1000), (1023, 2000), (0, 3000), (1, 4000)));
+            Assert.Equal(new[] { 1f, 2f, 3f, 4f }, fresh);
+        }
+
+        [Fact]
+        public void Collector_HandlesMonotonicCounter()
+        {
+            var c = new FrameTimeCollector();
+            c.Collect(5000, Buffer());
+            // sayaç 5000 → 5003: kareler 5000..5002 → indeks 5000 % 1024 = 904..906
+            var fresh = c.Collect(5003, Buffer((904, 7000), (905, 8000), (906, 9000)));
+            Assert.Equal(new[] { 7f, 8f, 9f }, fresh);
+        }
+
+        [Fact]
+        public void Store_RoundTripsRunsWithFrameTimes()
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "warden-bench-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new BenchmarkStore(dir);
+                store.Save(new BenchmarkRun
+                {
+                    Id = "20261009-120000", Label = "Profil 3", Game = "War Thunder", DurationSeconds = 60,
+                    StartUtc = new DateTime(2026, 10, 9, 9, 0, 0, DateTimeKind.Utc), FrameTimesExact = true,
+                    FrameTimesMs = new[] { 6.9f, 7.1f, 16.6f },
+                    Samples = { new BenchmarkSample { T = 1, Fps = 144, GpuPower = 110.5f } }
+                });
+                Assert.Equal(1, store.Count());
+
+                var run = store.LoadAll().Single();
+                Assert.Equal(new[] { 6.9f, 7.1f, 16.6f }, run.FrameTimesMs);
+                Assert.Equal(110.5f, run.Samples[0].GpuPower);
+
+                store.Rename(run, "Profil 4");
+                Assert.Equal("Profil 4", store.LoadAll().Single().Label);
+
+                store.Delete(run.Id);
+                Assert.Empty(store.LoadAll());
+            }
+            finally { if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, true); }
+        }
+
+        [Theory]
+        [InlineData("F9", System.Windows.Forms.Keys.F9)]
+        [InlineData("F12", System.Windows.Forms.Keys.F12)]
+        [InlineData("A", System.Windows.Forms.Keys.F10)]     // listede olmayan tuş → varsayılan
+        [InlineData(null, System.Windows.Forms.Keys.F10)]
+        public void Hotkey_ParsesOnlyAllowedKeys(string? name, System.Windows.Forms.Keys expected)
+        {
+            Assert.Equal(expected, GlobalHotkey.Parse(name));
+        }
+    }
+}

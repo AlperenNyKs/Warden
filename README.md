@@ -59,6 +59,13 @@ you played and how hot things got. Everything is modular: turn off what you don'
 ### 🔇 Audio device enforcer
 - Keeps unused or phantom virtual audio devices disabled, even after Windows or GG re-enables them.
 
+### ⏱️ Benchmark *(optional module)*
+- You change the settings, Warden measures: start / stop a run with **Ctrl+Shift+F10** from inside the game.
+- Records FPS and frame times from **RTSS** (comes with MSI Afterburner) plus CPU / GPU temperature, power, clock
+  and load every second.
+- Summary after a warm-up: average FPS, 1% low (from real frame times), average / p95 temperatures, average MHz and
+  watts, and FPS per watt (GPU, CPU or total).
+
 ### 🧩 Modular by design
 - Turn each module off in **Settings → Modules**. A module that is off does no background work at all: with Sonar off
   Warden never talks to GG, with hardware monitoring off the sensor driver is never loaded.

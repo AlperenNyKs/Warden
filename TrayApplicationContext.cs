@@ -32,6 +32,16 @@ namespace Warden
         public HardwareMonitorService Telemetry { get; } = new();
         public SessionRecorder Recorder { get; }
         public GameHistory History { get; }
+
+        // Benchmark: kayıt, kayıtlar ve global kısayol tuşu (modül açıkken)
+        public BenchmarkRecorder Benchmark { get; }
+        public BenchmarkStore Benchmarks { get; }
+        private GlobalHotkey? _hotkey;
+        private string? _hotkeyKey;
+        /// <summary>Kısayol kaydedildi mi (başka uygulama almışsa false); modül kapalıysa null.</summary>
+        public bool? HotkeyRegistered { get; private set; }
+        /// <summary>Benchmark sayfasındaki "sonraki kaydın etiketi"; boşsa "Kayıt N".</summary>
+        public string NextBenchmarkLabel { get; set; } = "";
         private readonly TempAlarmMonitor _tempAlarm = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10));
         private readonly SessionSummaryTracker _sessionSummary = new();
         private readonly object _telemetryHandlerLock = new();
@@ -102,6 +112,8 @@ namespace Warden
             _client = new SteelSeriesClient();
             Recorder = new SessionRecorder(Path.Combine(_appDataFolder, "sessions"));
             History = new GameHistory(Path.Combine(_appDataFolder, "history.json"));
+            Benchmark = new BenchmarkRecorder(() => LastSnapshot);
+            Benchmarks = new BenchmarkStore(Path.Combine(_appDataFolder, "benchmarks"));
             Recorder.StateChanged += () =>
             {
                 UpdateTelemetryDemand();
@@ -260,6 +272,75 @@ namespace Warden
                 Recorder.Stop();
                 Log("[Recorder] Recording stopped (hardware module off).");
             }
+
+            ApplyBenchmarkHotkey();
+        }
+
+        // ── Benchmark ───────────────────────────────────────────────────
+
+        /// <summary>Modül açıksa Ctrl+Shift+&lt;tuş&gt; kaydedilir; kapanınca bırakılır ve süren kayıt bitirilir.</summary>
+        private void ApplyBenchmarkHotkey()
+        {
+            string? want = Config.ModuleBenchmark ? Config.BenchmarkHotkey : null;
+            if (want == _hotkeyKey) return;
+
+            _hotkey?.Dispose();
+            _hotkey = null;
+            _hotkeyKey = want;
+            HotkeyRegistered = null;
+
+            if (want == null)
+            {
+                if (Benchmark.IsRecording) StopBenchmark();
+                return;
+            }
+
+            _hotkey = new GlobalHotkey(GlobalHotkey.Parse(want));
+            _hotkey.Pressed += ToggleBenchmark;
+            HotkeyRegistered = _hotkey.IsRegistered;
+            Log(_hotkey.IsRegistered
+                ? $"[Benchmark] Hotkey Ctrl+Shift+{want} registered."
+                : $"[Benchmark] Hotkey Ctrl+Shift+{want} is taken by another application.");
+        }
+
+        public void ToggleBenchmark()
+        {
+            if (Benchmark.IsRecording) StopBenchmark();
+            else StartBenchmark();
+        }
+
+        private void StartBenchmark()
+        {
+            string label = NextBenchmarkLabel.Trim();
+            if (label.Length == 0) label = Loc.Format("BenchmarkAutoLabel", Benchmarks.Count() + 1);
+            string game = ActiveGame != null ? GameDisplayName(ActiveGame) : "";
+
+            Benchmark.Start(label, game);
+            UpdateTelemetryDemand();   // kayıt boyunca sensörler saniyede bir
+            Log($"[Benchmark] Started: {label} ({game})");
+            ShowBalloon(3000, Loc.Format("BenchmarkStarted", label, "Ctrl+Shift+" + Config.BenchmarkHotkey), ToolTipIcon.Info);
+            _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.RefreshBenchmarks()));
+        }
+
+        private void StopBenchmark()
+        {
+            var run = Benchmark.Stop();
+            UpdateTelemetryDemand();
+            if (run == null) return;
+
+            try { Benchmarks.Save(run); }
+            catch (Exception ex) { Log($"[Benchmark] Save failed: {ex.Message}"); }
+
+            var summary = BenchmarkStats.Compute(run, Config.BenchmarkWarmupSeconds);
+            string text = Loc.Format("BenchmarkStopped", run.Label, Loc.Duration(TimeSpan.FromSeconds(run.DurationSeconds)));
+            if (summary.AvgFps is double fps)
+                text += "\n" + Loc.Format("BenchmarkStoppedFps", Math.Round(fps), summary.Low1Fps is double low ? Math.Round(low).ToString() : "–");
+            if (run.DurationSeconds < Config.BenchmarkWarmupSeconds + 5)
+                text += "\n" + Loc.Get("BenchmarkTooShort");
+
+            Log($"[Benchmark] Stopped: {run.Label}, {run.DurationSeconds:0}s, {run.Samples.Count} samples, {run.FrameTimesMs.Length} frames, exact={run.FrameTimesExact}");
+            ShowBalloon(8000, text, ToolTipIcon.Info);
+            _app.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.RefreshBenchmarks()));
         }
 
         /// <summary>Tray menüsündeki "Reload Config": config.json'ı diskten yeniden okur.</summary>
@@ -377,6 +458,8 @@ namespace Warden
 
                 // Cihazları otomatik devre dışı bırakma ve sürekli denetimi başlat
                 StartDeviceEnforcement();
+
+                ApplyBenchmarkHotkey();
             }
             catch (Exception ex)
             {
@@ -986,7 +1069,7 @@ namespace Warden
                 return;
             }
 
-            bool recording = Recorder.IsRecording;
+            bool recording = Recorder.IsRecording || Benchmark.IsRecording;
             bool background = (Config.GpuProfileActive && Config.TargetMhz > 0) || Config.TempAlarmEnabled ||
                               _sessionSummary.IsActive;   // oyun süresince: özet ve geçmiş için sıcaklıklar
 
@@ -1002,8 +1085,9 @@ namespace Warden
                 Telemetry.Initialize(Config.TelemetryFavorites, Config.TelemetryGraphSensors);
             }
 
-            Telemetry.FullScan = uiTelemetry || recording;
-            Telemetry.Start(uiTelemetry ? 1000 : 2000);
+            // Benchmark yalnızca CPU/GPU okur (hafif tarama) ama saniyede bir
+            Telemetry.FullScan = uiTelemetry || Recorder.IsRecording;
+            Telemetry.Start(uiTelemetry || Benchmark.IsRecording ? 1000 : 2000);
         }
 
         /// <summary>Pencere sayfaları telemetri ihtiyacını bildirir (ör. "ui-telemetry", "ui-gpu", "ui-status").</summary>
@@ -1277,6 +1361,13 @@ namespace Warden
 
             Safe(() => _deviceEnforceTimer?.Dispose());
             Safe(() => _updateTimer?.Dispose());
+            Safe(() =>
+            {
+                // Çıkışta süren benchmark kaybolmasın
+                var run = Benchmark.Stop();
+                if (run != null) Benchmarks.Save(run);
+            });
+            Safe(() => _hotkey?.Dispose());
             Safe(() => _watcher?.Stop());
             Safe(() => Recorder.Dispose());
             Safe(() => Telemetry.Dispose());
