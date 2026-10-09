@@ -570,6 +570,8 @@ namespace Warden
             string hotkey = "Ctrl+Shift+" + _context.Config.BenchmarkHotkey;
             var live = _context.Benchmark.Live;
             lblBenchmarkToggle.Text = Loc.Get(live != null ? "BenchmarkStop" : "BenchmarkStart");
+            // Kısayol başka bir uygulamada kayıtlıysa çalışmayan bir tuşu önermesin
+            lblBenchmarkToggleHotkey.Text = _context.HotkeyRegistered == true ? hotkey : "";
             txtBenchmarkHint.Text = Loc.Format("BenchmarkHint", _context.Config.BenchmarkWarmupSeconds);
 
             if (live is (string app, var fps, TimeSpan elapsed))
