@@ -551,7 +551,7 @@ namespace Warden
             int warmup = _context.Config.BenchmarkWarmupSeconds;
             spBenchmarkRuns.Children.Clear();
             var runs = _context.Benchmarks.LoadAll();
-            _benchmarkRuns = runs;
+            _benchmarkRuns = runs.SelectMany(BenchmarkLaps.Expand).ToList();   // turlu kayıtlar tur tur karşılaştırılır
             _benchmarkSelected.IntersectWith(runs.Select(r => r.Id));   // silinen kayıtlar seçimden düşer
             RenderBenchmarkCompare();
             if (runs.Count == 0)
@@ -1080,69 +1080,83 @@ namespace Warden
         {
             var secondary = (Brush)FindResource("TxtSecond");
             var panel = new StackPanel();
+            bool hasLaps = run.Segments is { Count: > 0 };
 
             // Etiket: yerinde düzenlenir (Enter veya odak kaybı kaydeder)
             var header = new StackPanel { Orientation = Orientation.Horizontal };
-            var label = new System.Windows.Controls.TextBox
-            {
-                Text = run.Label,
-                FontWeight = FontWeights.SemiBold,
-                FontSize = 13,
-                Foreground = (Brush)FindResource("TxtPrimary"),
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(0),
-                MinWidth = 60,
-                ToolTip = Loc.Get("BenchmarkRenameTip")
-            };
-            void Commit()
-            {
-                string text = label.Text.Trim();
-                if (text.Length == 0) { label.Text = run.Label; return; }
-                if (text == run.Label) return;
-                _context.Benchmarks.Rename(run, text);
-            }
-            label.LostFocus += (s, e) => Commit();
-            label.KeyDown += (s, e) => { if (e.Key == Key.Enter) { Commit(); Keyboard.ClearFocus(); } };
+            var label = EditableLabel(run.Label, 13, text => _context.Benchmarks.Rename(run, text));
             header.Children.Add(label);
 
             string meta = string.Join(" · ", new[]
             {
-                run.Game, run.StartUtc.ToLocalTime().ToString("g"), Loc.Duration(TimeSpan.FromSeconds(run.DurationSeconds))
+                run.Game, run.StartUtc.ToLocalTime().ToString("g"), Loc.Duration(TimeSpan.FromSeconds(run.DurationSeconds)),
+                hasLaps ? Loc.Format("BenchmarkLapCount", run.Segments!.Count) : ""
             }.Where(x => !string.IsNullOrEmpty(x)));
             header.Children.Add(new TextBlock { Text = "  " + meta, Foreground = secondary, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center });
             panel.Children.Add(header);
 
-            TextBlock Line(string text, Brush? brush = null, double size = 12) => new()
+            if (!hasLaps)
             {
-                Text = text, Foreground = brush ?? secondary, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0)
-            };
-
-            if (sum.MeasuredSeconds <= 0)
-            {
-                panel.Children.Add(Line(Loc.Get("BenchmarkRunShort")));
+                AddSummaryLines(panel, sum, basis);
             }
             else
             {
-                string low = (sum.Low1Approximate ? "≈ " : "") + Num(sum.Low1Fps);
-                panel.Children.Add(Line(Loc.Format("BenchmarkRunFps", Num(sum.AvgFps), low), (Brush)FindResource("TxtPrimary"), 13));
-                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "GPU", Num(sum.AvgGpuClock), Num(sum.MinGpuClock), Num(sum.MaxGpuClock),
-                                                   Num(sum.AvgGpuTemp), Num(sum.P95GpuTemp), Num(sum.AvgGpuPower, "0.0"), Num(sum.AvgGpuLoad))));
-                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "CPU", Num(sum.AvgCpuClock), Num(sum.MinCpuClock), Num(sum.MaxCpuClock),
-                                                   Num(sum.AvgCpuTemp), Num(sum.P95CpuTemp), Num(sum.AvgCpuPower, "0.0"), Num(sum.AvgCpuLoad))));
-                panel.Children.Add(Line(Loc.Format("BenchmarkRunEfficiency", Num(sum.FpsPerWatt(basis), "0.00"), BasisName(basis)),
-                                        (Brush)FindResource("Accent")));
+                // Her tur ayrı karşılaştırma birimi: kendi seçim kutusu, etiketi ve özeti
+                int warmup = _context.Config.BenchmarkWarmupSeconds;
+                for (int i = 0; i < run.Segments!.Count; i++)
+                {
+                    var seg = run.Segments[i];
+                    var lap = BenchmarkLaps.Slice(run, seg, i + 1);
+                    var lapPanel = new StackPanel();
+                    var lapHeader = new StackPanel { Orientation = Orientation.Horizontal };
+                    lapHeader.Children.Add(new TextBlock { Text = $"{i + 1}. ", Foreground = secondary, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+                    lapHeader.Children.Add(EditableLabel(seg.Label, 12.5, text =>
+                    {
+                        seg.Label = text;
+                        seg.LabelEdited = true;
+                        _context.Benchmarks.UpdateInfo(run);
+                        Dispatcher.BeginInvoke(new Action(RenderBenchmarks));   // aynı etiketli turlar yeniden gruplansın
+                    }));
+                    lapHeader.Children.Add(new TextBlock
+                    {
+                        Text = $"  {FormatClock(seg.Start)}–{FormatClock(seg.End)} · {Loc.Duration(TimeSpan.FromSeconds(seg.Duration))}",
+                        Foreground = secondary, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center
+                    });
+                    lapPanel.Children.Add(lapHeader);
+                    AddSummaryLines(lapPanel, BenchmarkStats.Compute(lap, warmup), basis);
+
+                    var lapGrid = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+                    lapGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    lapGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    lapGrid.Children.Add(SelectBox(lap.Id));
+                    Grid.SetColumn(lapPanel, 1);
+                    lapGrid.Children.Add(lapPanel);
+                    panel.Children.Add(lapGrid);
+                }
             }
 
-            var delete = new Button
+            // Turlara böl (otomatik) / Turları düzenle (zaman çizelgesi) / Sil
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
+            Button Action(string content, string tip, string style)
+                => new() { Content = content, Style = (Style)FindResource(style), Padding = new Thickness(10, 5, 10, 5), Margin = new Thickness(6, 0, 0, 0), Cursor = Cursors.Hand, ToolTip = tip };
+
+            if (!hasLaps)
             {
-                Content = "🗑",
-                Style = (Style)FindResource("DangerButton"),
-                Padding = new Thickness(10, 5, 10, 5),
-                VerticalAlignment = VerticalAlignment.Top,
-                Cursor = Cursors.Hand,
-                ToolTip = Loc.Get("BenchmarkDelete")
+                var split = Action(Loc.Get("BenchmarkSplit"), Loc.Get("BenchmarkSplitTip"), "FlatButton");
+                split.Click += (s, e) => AutoSplitRun(run);
+                actions.Children.Add(split);
+            }
+            var edit = Action(Loc.Get("BenchmarkEditLaps"), Loc.Get("BenchmarkEditLapsTip"), "FlatButton");
+            edit.Click += (s, e) =>
+            {
+                var editor = new LapEditorWindow(this, run, _context.Config.BenchmarkWarmupSeconds);
+                if (editor.ShowDialog() != true) return;
+                _context.Benchmarks.UpdateInfo(run);
+                RenderBenchmarks();
             };
+            actions.Children.Add(edit);
+
+            var delete = Action("🗑", Loc.Get("BenchmarkDelete"), "DangerButton");
             delete.Click += (s, e) =>
             {
                 if (MessageBox.Show(Loc.Format("BenchmarkDeleteConfirm", run.Label), "Warden",
@@ -1150,27 +1164,17 @@ namespace Warden
                 _context.Benchmarks.Delete(run.Id);
                 RenderBenchmarks();
             };
-
-            // Karşılaştırmaya ekle / çıkar
-            var select = new System.Windows.Controls.CheckBox
-            {
-                IsChecked = _benchmarkSelected.Contains(run.Id),
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 2, 14, 0),
-                ToolTip = Loc.Get("BenchmarkSelectTip")
-            };
-            select.Checked += (s, e) => { _benchmarkSelected.Add(run.Id); RenderBenchmarkCompare(); };
-            select.Unchecked += (s, e) => { _benchmarkSelected.Remove(run.Id); RenderBenchmarkCompare(); };
+            actions.Children.Add(delete);
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.Children.Add(select);
+            if (!hasLaps) grid.Children.Add(SelectBox(run.Id));   // turlu kayıtta seçim turlarda
             Grid.SetColumn(panel, 1);
             grid.Children.Add(panel);
-            Grid.SetColumn(delete, 2);
-            grid.Children.Add(delete);
+            Grid.SetColumn(actions, 2);
+            grid.Children.Add(actions);
 
             return new Border
             {
@@ -1179,6 +1183,113 @@ namespace Warden
                 Padding = new Thickness(0, 12, 0, 12),
                 Child = grid
             };
+        }
+
+        private static string FormatClock(double seconds) => $"{(int)seconds / 60}:{(int)seconds % 60:00}";
+
+        // "Nasıl test yapılır?": numaralı adımlar; başlığa tıklayınca açılır / kapanır
+        private static readonly string[] HowToSteps = { "HowToScene", "HowToWarmup", "HowToStockTwice", "HowToMenu", "HowToAlternate", "HowToLength" };
+
+        private void BtnBenchmarkHowTo_Click(object sender, RoutedEventArgs e)
+        {
+            bool open = pnlBenchmarkHowTo.Visibility != Visibility.Visible;
+            pnlBenchmarkHowTo.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            UpdateHowTo();
+        }
+
+        private void UpdateHowTo()
+        {
+            bool open = pnlBenchmarkHowTo.Visibility == Visibility.Visible;
+            lblBenchmarkHowTo.Text = (open ? "▾ " : "▸ ") + Loc.Get("HowToTitle");
+            pnlBenchmarkHowTo.Children.Clear();
+            for (int i = 0; i < HowToSteps.Length; i++)
+            {
+                var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.Children.Add(new TextBlock { Text = $"{i + 1}.", Foreground = (Brush)FindResource("Accent"), FontWeight = FontWeights.SemiBold });
+                var text = new TextBlock { Text = Loc.Get(HowToSteps[i]), Foreground = (Brush)FindResource("TxtSecond"), TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+                Grid.SetColumn(text, 1);
+                row.Children.Add(text);
+                pnlBenchmarkHowTo.Children.Add(row);
+            }
+        }
+
+        /// <summary>Yerinde düzenlenen etiket: Enter veya odak kaybı kaydeder; boş bırakılırsa eski hâline döner.</summary>
+        private System.Windows.Controls.TextBox EditableLabel(string text, double size, Action<string> save)
+        {
+            var box = new System.Windows.Controls.TextBox
+            {
+                Text = text, FontWeight = FontWeights.SemiBold, FontSize = size,
+                Foreground = (Brush)FindResource("TxtPrimary"), Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0), Padding = new Thickness(0), MinWidth = 60,
+                ToolTip = Loc.Get("BenchmarkRenameTip")
+            };
+            string current = text;
+            void Commit()
+            {
+                string value = box.Text.Trim();
+                if (value.Length == 0) { box.Text = current; return; }
+                if (value == current) return;
+                current = value;
+                save(value);
+            }
+            box.LostFocus += (s, e) => Commit();
+            box.KeyDown += (s, e) => { if (e.Key == Key.Enter) { Commit(); Keyboard.ClearFocus(); } };
+            return box;
+        }
+
+        private System.Windows.Controls.CheckBox SelectBox(string id)
+        {
+            var box = new System.Windows.Controls.CheckBox
+            {
+                IsChecked = _benchmarkSelected.Contains(id),
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 2, 14, 0),
+                ToolTip = Loc.Get("BenchmarkSelectTip")
+            };
+            box.Checked += (s, e) => { _benchmarkSelected.Add(id); RenderBenchmarkCompare(); };
+            box.Unchecked += (s, e) => { _benchmarkSelected.Remove(id); RenderBenchmarkCompare(); };
+            return box;
+        }
+
+        private void AddSummaryLines(StackPanel panel, BenchmarkSummary sum, EfficiencyBasis basis)
+        {
+            var secondary = (Brush)FindResource("TxtSecond");
+            TextBlock Line(string text, Brush? brush = null, double size = 12) => new()
+            {
+                Text = text, Foreground = brush ?? secondary, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0)
+            };
+
+            if (sum.MeasuredSeconds <= 0)
+            {
+                panel.Children.Add(Line(Loc.Get("BenchmarkRunShort")));
+                return;
+            }
+            string low = (sum.Low1Approximate ? "≈ " : "") + Num(sum.Low1Fps);
+            panel.Children.Add(Line(Loc.Format("BenchmarkRunFps", Num(sum.AvgFps), low), (Brush)FindResource("TxtPrimary"), 13));
+            panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "GPU", Num(sum.AvgGpuClock), Num(sum.MinGpuClock), Num(sum.MaxGpuClock),
+                                               Num(sum.AvgGpuTemp), Num(sum.P95GpuTemp), Num(sum.AvgGpuPower, "0.0"), Num(sum.AvgGpuLoad))));
+            panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "CPU", Num(sum.AvgCpuClock), Num(sum.MinCpuClock), Num(sum.MaxCpuClock),
+                                               Num(sum.AvgCpuTemp), Num(sum.P95CpuTemp), Num(sum.AvgCpuPower, "0.0"), Num(sum.AvgCpuLoad))));
+            panel.Children.Add(Line(Loc.Format("BenchmarkRunEfficiency", Num(sum.FpsPerWatt(basis), "0.00"), BasisName(basis)),
+                                    (Brush)FindResource("Accent")));
+        }
+
+        /// <summary>"Turlara böl": GPU yükünün düştüğü yerlerden otomatik; her tura frekans/watt'tan etiket önerilir.</summary>
+        private void AutoSplitRun(BenchmarkRun run)
+        {
+            int warmup = _context.Config.BenchmarkWarmupSeconds;
+            var laps = BenchmarkLaps.AutoSplit(run);
+            if (laps.Count < 2)
+            {
+                MessageBox.Show(Loc.Get("BenchmarkNoLapsFound"), "Warden", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            foreach (var lap in laps) lap.Label = LapLabels.Suggest(run, lap, warmup);
+            run.Segments = laps;
+            _context.Benchmarks.UpdateInfo(run);
+            RenderBenchmarks();
         }
 
         /// <summary>Arka plan taraması oyun listesini/kuralları değiştirince tepsi çağırır.</summary>
@@ -2587,6 +2698,7 @@ namespace Warden
             lblBenchmarkCompareSection.Text = Loc.Get("BenchmarkCompareSection");
             lblBenchmarkExport.Text     = Loc.Get("BenchmarkExport");
             lblBenchmarkMetricChart.Text = Loc.Get("BenchmarkMetricChart");
+            UpdateHowTo();
             lblModuleBenchmark.Text     = Loc.Get("ModuleBenchmark");
             lblModuleBenchmarkDesc.Text = Loc.Get("ModuleBenchmarkDesc");
             lblBenchmarkHotkey.Text     = Loc.Get("BenchmarkHotkey");

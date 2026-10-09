@@ -42,6 +42,7 @@ namespace Warden
         public bool? HotkeyRegistered { get; private set; }
         /// <summary>Benchmark sayfasındaki "sonraki kaydın etiketi"; boşsa "Kayıt N".</summary>
         public string NextBenchmarkLabel { get; set; } = "";
+        private bool _benchmarkAutoLabel;   // etiket yazılmadıysa bitişte frekans/watt'tan öneri verilir
         private readonly TempAlarmMonitor _tempAlarm = new(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(10));
         private readonly SessionSummaryTracker _sessionSummary = new();
         private readonly object _telemetryHandlerLock = new();
@@ -312,7 +313,8 @@ namespace Warden
         private void StartBenchmark()
         {
             string label = NextBenchmarkLabel.Trim();
-            if (label.Length == 0) label = Loc.Format("BenchmarkAutoLabel", Benchmarks.Count() + 1);
+            _benchmarkAutoLabel = label.Length == 0;
+            if (_benchmarkAutoLabel) label = Loc.Format("BenchmarkAutoLabel", Benchmarks.Count() + 1);
             string game = ActiveGame != null ? GameDisplayName(ActiveGame) : "";
 
             Benchmark.Start(label, game);
@@ -343,6 +345,19 @@ namespace Warden
             if (run == null) return;
             if (string.IsNullOrEmpty(run.Game)) run.Game = BenchmarkGameName(Benchmark.LastTargetPath);
 
+            // Menü / yükleme aralarından turlara böl; her tura gözlenen GPU frekansı ve watt'tan etiket öner
+            int warmup = Config.BenchmarkWarmupSeconds;
+            var laps = BenchmarkLaps.AutoSplit(run);
+            if (laps.Count >= 2)
+            {
+                foreach (var lap in laps) lap.Label = LapLabels.Suggest(run, lap, warmup);
+                run.Segments = laps;
+            }
+            if (_benchmarkAutoLabel)
+                run.Label = laps.Count >= 2
+                    ? Loc.Format("BenchmarkLapCount", laps.Count)
+                    : LapLabels.Suggest(run, new BenchmarkSegment { Start = 0, End = run.DurationSeconds }, warmup);
+
             try { Benchmarks.Save(run); }
             catch (Exception ex) { Log($"[Benchmark] Save failed: {ex.Message}"); }
 
@@ -350,6 +365,8 @@ namespace Warden
             string text = Loc.Format("BenchmarkStopped", run.Label, Loc.Duration(TimeSpan.FromSeconds(run.DurationSeconds)));
             if (summary.AvgFps is double fps)
                 text += "\n" + Loc.Format("BenchmarkStoppedFps", Math.Round(fps), summary.Low1Fps is double low ? Math.Round(low).ToString() : "–");
+            if (run.Segments != null)
+                text += "\n" + Loc.Format("BenchmarkSplitInto", run.Segments.Count);
             if (run.DurationSeconds < Config.BenchmarkWarmupSeconds + 5)
                 text += "\n" + Loc.Get("BenchmarkTooShort");
 

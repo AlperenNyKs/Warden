@@ -792,3 +792,105 @@ namespace Warden.Tests
         }
     }
 }
+
+namespace Warden.Tests
+{
+    public class BenchmarkLapsTests
+    {
+        // GPU yükü dizisi: her eleman bir saniye
+        private static BenchmarkRun RunWithLoad(params (int seconds, float load)[] parts)
+        {
+            var samples = new List<BenchmarkSample>();
+            int t = 0;
+            foreach (var (seconds, load) in parts)
+                for (int i = 0; i < seconds; i++)
+                    samples.Add(new BenchmarkSample { T = ++t, GpuLoad = load, Fps = load > 50 ? 60 : 5 });
+            return new BenchmarkRun { Id = "r", Label = "Kayıt", DurationSeconds = t, Samples = samples };
+        }
+
+        [Fact]
+        public void AutoSplit_CutsAtLoadGaps()
+        {
+            // 60 sn oyun, 5 sn menü, 90 sn oyun
+            var laps = BenchmarkLaps.AutoSplit(RunWithLoad((60, 98), (5, 10), (90, 97)));
+            Assert.Equal(2, laps.Count);
+            Assert.Equal(0, laps[0].Start);
+            Assert.Equal(60, laps[0].End);
+            Assert.Equal(65, laps[1].Start);
+            Assert.Equal(155, laps[1].End);
+        }
+
+        [Fact]
+        public void AutoSplit_ShortDipsStayInsideALap_AndShortPartsAreDropped()
+        {
+            // 2 sn'lik düşüş (sahne geçişi) bölmez; 10 sn'lik parça tur sayılmaz
+            var laps = BenchmarkLaps.AutoSplit(RunWithLoad((40, 98), (2, 20), (40, 98), (6, 5), (10, 98), (4, 5), (30, 99)));
+            Assert.Equal(2, laps.Count);
+            Assert.Equal(82, laps[0].Duration);
+            Assert.Equal(30, laps[1].Duration);
+        }
+
+        [Fact]
+        public void Slice_TakesSamplesAndFramesOfTheLap_AndRebasesTime()
+        {
+            var run = RunWithLoad((10, 98), (10, 98));
+            run.FrameTimesMs = Enumerable.Repeat(100f, 200).ToArray();   // 10 FPS × 20 sn
+            var lap = BenchmarkLaps.Slice(run, new BenchmarkSegment { Start = 10, End = 20, Label = "B" }, 2);
+
+            Assert.Equal("r#2", lap.Id);
+            Assert.Equal("B", lap.Label);
+            Assert.Equal(10, lap.Samples.Count);
+            Assert.Equal(1, lap.Samples[0].T);           // tur başından
+            Assert.Equal(100, lap.FrameTimesMs.Length);   // 10..20 sn arasındaki kareler
+        }
+
+        [Fact]
+        public void Expand_WithoutSegmentsIsTheRunItself()
+        {
+            var run = RunWithLoad((30, 98));
+            Assert.Same(run, BenchmarkLaps.Expand(run).Single());
+            run.Segments = new List<BenchmarkSegment> { new() { Start = 0, End = 15, Label = "A" }, new() { Start = 15, End = 30, Label = "A" } };
+            Assert.Equal(new[] { "r#1", "r#2" }, BenchmarkLaps.Expand(run).Select(r => r.Id));
+        }
+
+        [Fact]
+        public void SameLabelLaps_GroupTogether()
+        {
+            var run = RunWithLoad((60, 98));
+            run.Segments = new List<BenchmarkSegment>
+            {
+                new() { Start = 0, End = 20, Label = "Stok" }, new() { Start = 20, End = 40, Label = "UV" }, new() { Start = 40, End = 60, Label = "Stok" }
+            };
+            var groups = BenchmarkCompare.Group(BenchmarkLaps.Expand(run), 0);
+            Assert.Equal(2, groups.Single(g => g.Label == "Stok").Runs.Count);
+        }
+
+        private static BenchmarkRun Lap(Func<int, float> clock, Func<int, float> watts) => new()
+        {
+            Id = "l", Label = "", DurationSeconds = 60,
+            Samples = Enumerable.Range(1, 60).Select(t => new BenchmarkSample { T = t, GpuClock = clock(t), GpuPower = watts(t) }).ToList()
+        };
+
+        [Fact]
+        public void Profile_LockedClock()
+        {
+            var p = BenchmarkLaps.Profile(Lap(t => 1575 + (t % 3), t => 120 + (t % 10)), 10);
+            Assert.Equal(LapProfileKind.Locked, p.Kind);
+            Assert.InRange(p.MedianMhz!.Value, 1575, 1577);
+        }
+
+        [Fact]
+        public void Profile_PowerLimited()
+        {
+            var p = BenchmarkLaps.Profile(Lap(t => 1470 + (t % 12) * 10, t => 143 + (t % 2)), 10);
+            Assert.Equal(LapProfileKind.PowerLimited, p.Kind);
+        }
+
+        [Fact]
+        public void Profile_Variable()
+        {
+            var p = BenchmarkLaps.Profile(Lap(t => 1300 + (t % 12) * 30, t => 80 + (t % 12) * 8), 10);
+            Assert.Equal(LapProfileKind.Variable, p.Kind);
+        }
+    }
+}
