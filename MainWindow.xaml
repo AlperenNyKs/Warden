@@ -1446,21 +1446,37 @@
                                             <TextBlock x:Name="txtBenchmarkCompareHint" Text="" Foreground="{StaticResource TxtSecond}"
                                                        FontSize="11.5" TextWrapping="Wrap"/>
                                             <StackPanel x:Name="pnlBenchmarkCompare" Visibility="Collapsed">
-                                                <Grid x:Name="grdBenchmarkCompare" Margin="0,10,0,0"/>
+                                                <!-- Tek satırlık sonuç (temel dışındaki her grup) ve notlar -->
+                                                <StackPanel x:Name="spBenchmarkHeadline" Margin="0,10,0,0"/>
+                                                <StackPanel x:Name="spBenchmarkWarnings" Margin="0,4,0,0"/>
 
-                                                <Grid Margin="0,18,0,8">
+                                                <!-- Sabit genişlikte sütunlar; başlıklar sürüklenerek yer değiştirir -->
+                                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,12,0,0">
+                                                    <Grid x:Name="grdBenchmarkCompare" HorizontalAlignment="Left"/>
+                                                </ScrollViewer>
+
+                                                <WrapPanel x:Name="spBenchmarkLegend" Margin="0,18,0,8"/>
+
+                                                <!-- Üstte FPS, altta seçilen ölçü: iki ayrı ölçek, tek eksen -->
+                                                <TextBlock x:Name="lblBenchmarkFpsChart" Text="FPS" Foreground="{StaticResource TxtSecond}"
+                                                           FontSize="11" FontWeight="Bold" Margin="0,0,0,4"/>
+                                                <Grid Height="190">
+                                                    <Canvas x:Name="cvsBenchmarkFps" Background="Transparent" ClipToBounds="True"/>
+                                                    <Canvas x:Name="cvsBenchmarkFpsHover" IsHitTestVisible="False"/>
+                                                </Grid>
+
+                                                <Grid Margin="0,14,0,4">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <WrapPanel x:Name="spBenchmarkLegend" VerticalAlignment="Center"/>
+                                                    <TextBlock x:Name="lblBenchmarkMetricChart" Text="" Foreground="{StaticResource TxtSecond}"
+                                                               FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
                                                     <ComboBox x:Name="cbBenchmarkChartMetric" Grid.Column="1" Width="150"
                                                               SelectionChanged="CbBenchmarkChartMetric_SelectionChanged"/>
                                                 </Grid>
-                                                <Grid Height="220">
-                                                    <Canvas x:Name="cvsBenchmarkChart" Background="Transparent" ClipToBounds="True"
-                                                            SizeChanged="CvsBenchmarkChart_SizeChanged"
-                                                            MouseMove="CvsBenchmarkChart_MouseMove" MouseLeave="CvsBenchmarkChart_MouseLeave"/>
+                                                <Grid Height="190">
+                                                    <Canvas x:Name="cvsBenchmarkChart" Background="Transparent" ClipToBounds="True"/>
                                                     <Canvas x:Name="cvsBenchmarkHover" IsHitTestVisible="False"/>
                                                 </Grid>
                                             </StackPanel>

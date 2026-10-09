@@ -624,17 +624,64 @@ namespace Warden.Tests
         }
 
         [Fact]
-        public void Verdict_FollowsMetricDirection_AndIgnoresNoise()
+        public void Compare_FollowsMetricDirection_AndIgnoresNoise()
         {
-            var fps = BenchmarkCompare.Metrics.Single(m => m.Key == "AvgFps");
-            var temp = BenchmarkCompare.Metrics.Single(m => m.Key == "GpuTemp");
-            var clock = BenchmarkCompare.Metrics.Single(m => m.Key == "GpuClock");
+            var a = BenchmarkCompare.Group(new[] { Run("A", 0, 100, 80, 150) }, 0).Single();
+            var faster = BenchmarkCompare.Group(new[] { Run("B", 1, 105, 85, 150) }, 0).Single();
+            var same = BenchmarkCompare.Group(new[] { Run("C", 2, 100.3, 80.3f, 150) }, 0).Single();
 
-            Assert.Equal(1, BenchmarkCompare.Verdict(fps, 5));      // daha çok FPS iyi
-            Assert.Equal(-1, BenchmarkCompare.Verdict(temp, 5));    // daha sıcak kötü
-            Assert.Equal(1, BenchmarkCompare.Verdict(temp, -5));
-            Assert.Equal(0, BenchmarkCompare.Verdict(clock, 10));   // MHz yalnızca bilgi
-            Assert.Equal(0, BenchmarkCompare.Verdict(fps, 0.3));    // gürültü bandı
+            Assert.Equal(DiffVerdict.Better, BenchmarkCompare.Compare(BenchmarkCompare.Metric("AvgFps"), a, faster, EfficiencyBasis.Gpu).Verdict);
+            Assert.Equal(DiffVerdict.Worse, BenchmarkCompare.Compare(BenchmarkCompare.Metric("GpuTemp"), a, faster, EfficiencyBasis.Gpu).Verdict);
+            Assert.Equal(DiffVerdict.Info, BenchmarkCompare.Compare(BenchmarkCompare.Metric("GpuClock"), a, faster, EfficiencyBasis.Gpu).Verdict);
+            Assert.Equal(DiffVerdict.Same, BenchmarkCompare.Compare(BenchmarkCompare.Metric("AvgFps"), a, same, EfficiencyBasis.Gpu).Verdict);   // %0,3
+            Assert.Equal(DiffVerdict.Same, BenchmarkCompare.Compare(BenchmarkCompare.Metric("GpuTemp"), a, same, EfficiencyBasis.Gpu).Verdict);  // 0,3 °C
+        }
+
+        [Fact]
+        public void Compare_TemperatureDiffIsInDegrees()
+        {
+            var groups = BenchmarkCompare.Group(new[] { Run("A", 0, 100, 78, 150), Run("B", 1, 100, 84, 150) }, 0);
+            var c = BenchmarkCompare.Compare(BenchmarkCompare.Metric("GpuTemp"), groups[0], groups[1], EfficiencyBasis.Gpu);
+            Assert.Equal(6.0, c.Diff!.Value, 3);
+            Assert.Equal(DiffVerdict.Worse, c.Verdict);
+        }
+
+        [Fact]
+        public void Compare_UsesRunToRunSpread_WhenEachGroupHasTwoRuns()
+        {
+            var fps = BenchmarkCompare.Metric("AvgFps");
+            // Dalgalı: A 90/110, B 98/112 → fark (+%5) dalgalanmanın içinde
+            var noisy = BenchmarkCompare.Group(new[] { Run("A", 0, 90, 80, 150), Run("A", 1, 110, 80, 150), Run("B", 2, 98, 80, 150), Run("B", 3, 112, 80, 150) }, 0);
+            var n = BenchmarkCompare.Compare(fps, noisy[0], noisy[1], EfficiencyBasis.Gpu);
+            Assert.True(n.SignificanceKnown);
+            Assert.Equal(DiffVerdict.NotSignificant, n.Verdict);
+
+            // Tutarlı: A 100/100.4, B 105/105.4 → fark anlamlı
+            var tight = BenchmarkCompare.Group(new[] { Run("A", 0, 100, 80, 150), Run("A", 1, 100.4, 80, 150), Run("B", 2, 105, 80, 150), Run("B", 3, 105.4, 80, 150) }, 0);
+            Assert.Equal(DiffVerdict.Better, BenchmarkCompare.Compare(fps, tight[0], tight[1], EfficiencyBasis.Gpu).Verdict);
+
+            // Tek kayıt: anlamlılık bilinmiyor
+            Assert.False(BenchmarkCompare.Compare(fps, tight[0], BenchmarkCompare.Group(new[] { Run("C", 4, 120, 80, 150) }, 0)[0], EfficiencyBasis.Gpu).SignificanceKnown);
+        }
+
+        [Fact]
+        public void Arrange_UsesUserOrderAndChosenBaseline()
+        {
+            var groups = BenchmarkCompare.Group(new[] { Run("Stok", 0, 100, 80, 150), Run("UV", 1, 100, 75, 120), Run("OC", 2, 110, 85, 170) }, 0);
+
+            var (ordered, baseline) = BenchmarkCompare.Arrange(groups, new[] { "oc", "Stok" }, "uv");
+            Assert.Equal(new[] { "OC", "Stok", "UV" }, ordered.Select(g => g.Label));   // sırada olmayan sona
+            Assert.Equal("UV", baseline.Label);
+
+            var (_, fallback) = BenchmarkCompare.Arrange(groups, Array.Empty<string>(), "silinmiş");
+            Assert.Equal("Stok", fallback.Label);   // seçilen temel yoksa ilk sütun
+        }
+
+        [Fact]
+        public void DurationMismatch_WhenRunsDifferMoreThan25Percent()
+        {
+            Assert.False(BenchmarkCompare.DurationMismatch(BenchmarkCompare.Group(new[] { Run("A", 0, 60, 70, 100, 100), Run("B", 1, 60, 70, 100, 120) }, 0)));
+            Assert.True(BenchmarkCompare.DurationMismatch(BenchmarkCompare.Group(new[] { Run("A", 0, 60, 70, 100, 100), Run("B", 1, 60, 70, 100, 300) }, 0)));
         }
 
         [Fact]
@@ -655,12 +702,12 @@ namespace Warden.Tests
             var groups = BenchmarkCompare.Group(new[] { Run("Stok", 0, 100, 80, 150), Run("UV", 5, 110, 70, 120) }, 0);
             var tr = new System.Globalization.CultureInfo("tr-TR");
 
-            string csv = BenchmarkCompare.SummaryCsv(groups, EfficiencyBasis.Gpu, k => k, tr);
+            string csv = BenchmarkCompare.SummaryCsv(groups, groups[0], EfficiencyBasis.Gpu, k => k, tr);
             var lines = csv.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
 
-            Assert.Equal("Metric;Stok (1);UV (1);UV %", lines[0]);
-            Assert.Equal("AvgFps;100,0;110,0;10,0", lines[1]);
-            Assert.Contains(lines, l => l.StartsWith("GpuTemp;80,0;70,0;-12,5"));
+            Assert.Equal("Metric;Stok (1);UV (1);UV Δ", lines[0]);
+            Assert.Equal("AvgFps;100,0;110,0;10,0%", lines[1]);
+            Assert.Contains("GpuTemp;80,0;70,0;-10,0", lines);   // sıcaklık farkı °C
         }
 
         [Fact]
@@ -710,6 +757,38 @@ namespace Warden.Tests
             var keys = BenchmarkCompare.Metrics.Select(m => m.Key).ToList();
             Assert.Equal(new[] { "GpuClock", "GpuClockMin", "GpuClockMax", "CpuClock", "CpuClockMin", "CpuClockMax" },
                          keys.Where(k => k.Contains("Clock")));
+        }
+    }
+}
+
+namespace Warden.Tests
+{
+    public class BenchmarkSteadyTempTests
+    {
+        [Fact]
+        public void SteadyTemp_IsTheLast60Seconds()
+        {
+            // 300 sn: sıcaklık 60 → 90 doğrusal artıyor, son 60 sn sabit 90
+            var run = new BenchmarkRun
+            {
+                Id = "s", Label = "A", DurationSeconds = 300,
+                Samples = Enumerable.Range(1, 300).Select(t => new BenchmarkSample { T = t, GpuTemp = t > 240 ? 90 : 60 + t / 8f }).ToList()
+            };
+            var s = BenchmarkStats.Compute(run, 10);
+            Assert.Equal(90.0, s.SteadyGpuTemp!.Value, 3);
+            Assert.True(s.AvgGpuTemp < s.SteadyGpuTemp);   // ortalama ısınma sürecini de içerir
+        }
+
+        [Fact]
+        public void SteadyTemp_ShortRunUsesSecondHalf()
+        {
+            var run = new BenchmarkRun
+            {
+                Id = "s", Label = "A", DurationSeconds = 40,
+                Samples = Enumerable.Range(1, 40).Select(t => new BenchmarkSample { T = t, GpuTemp = t <= 25 ? 70 : 80 }).ToList()
+            };
+            // ısınma 10 → ölçülen 30 sn → pencere 15 sn: T 26..40 = 80
+            Assert.Equal(80.0, BenchmarkStats.Compute(run, 10).SteadyGpuTemp!.Value, 3);
         }
     }
 }

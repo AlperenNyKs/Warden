@@ -49,7 +49,8 @@ namespace Warden
         double? AvgCpuTemp, double? P95CpuTemp, double? AvgGpuTemp, double? P95GpuTemp,
         double? AvgCpuPower, double? AvgGpuPower,
         double? AvgCpuClock, double? AvgGpuClock, double? AvgCpuLoad, double? AvgGpuLoad,
-        double? MinCpuClock, double? MaxCpuClock, double? MinGpuClock, double? MaxGpuClock)
+        double? MinCpuClock, double? MaxCpuClock, double? MinGpuClock, double? MaxGpuClock,
+        double? SteadyCpuTemp, double? SteadyGpuTemp)
     {
         public double? AvgTotalPower => AvgCpuPower is double c && AvgGpuPower is double g ? c + g : null;
 
@@ -102,7 +103,8 @@ namespace Warden
                 Avg(samples, s => s.CpuClock), Avg(samples, s => s.GpuClock),
                 Avg(samples, s => s.CpuLoad), Avg(samples, s => s.GpuLoad),
                 Min(samples, s => s.CpuClock), Max(samples, s => s.CpuClock),
-                Min(samples, s => s.GpuClock), Max(samples, s => s.GpuClock));
+                Min(samples, s => s.GpuClock), Max(samples, s => s.GpuClock),
+                Avg(Steady(samples, measured), s => s.CpuTemp), Avg(Steady(samples, measured), s => s.GpuTemp));
         }
 
         // Kare süreleri sırayla toplanarak geçen süre bulunur; ısınma süresi içindeki kareler atılır
@@ -128,6 +130,18 @@ namespace Warden
         {
             var v = s.Select(f).Where(x => x != null).Select(x => (double)x!.Value).ToList();
             return v.Count > 0 ? v.Average() : null;
+        }
+
+        /// <summary>Kararlı durum penceresi: kaydın son 60 sn'si (ölçülen süre 2 dk'dan kısaysa son yarısı).</summary>
+        public const double SteadyWindowSeconds = 60;
+
+        // Isınmış sistemin oturduğu sıcaklık: ortalama, ısınma sürecini de içerdiği için gerçek değeri düşük gösterir
+        private static List<BenchmarkSample> Steady(List<BenchmarkSample> samples, double measuredSeconds)
+        {
+            if (samples.Count == 0) return samples;
+            double window = Math.Min(SteadyWindowSeconds, measuredSeconds / 2);
+            double end = samples.Max(s => s.T);
+            return samples.Where(s => s.T > end - window).ToList();
         }
 
         // En düşük / en yüksek: ısınma sonrası saniyelik ölçümler arasında (ör. ısınınca düşen boost)
