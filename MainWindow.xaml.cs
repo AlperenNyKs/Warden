@@ -1002,10 +1002,10 @@ namespace Warden
             {
                 string low = (sum.Low1Approximate ? "≈ " : "") + Num(sum.Low1Fps);
                 panel.Children.Add(Line(Loc.Format("BenchmarkRunFps", Num(sum.AvgFps), low), (Brush)FindResource("TxtPrimary"), 13));
-                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "GPU", Num(sum.AvgGpuClock), Num(sum.AvgGpuTemp), Num(sum.P95GpuTemp),
-                                                   Num(sum.AvgGpuPower, "0.0"), Num(sum.AvgGpuLoad))));
-                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "CPU", Num(sum.AvgCpuClock), Num(sum.AvgCpuTemp), Num(sum.P95CpuTemp),
-                                                   Num(sum.AvgCpuPower, "0.0"), Num(sum.AvgCpuLoad))));
+                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "GPU", Num(sum.AvgGpuClock), Num(sum.MinGpuClock), Num(sum.MaxGpuClock),
+                                                   Num(sum.AvgGpuTemp), Num(sum.P95GpuTemp), Num(sum.AvgGpuPower, "0.0"), Num(sum.AvgGpuLoad))));
+                panel.Children.Add(Line(Loc.Format("BenchmarkRunDevice", "CPU", Num(sum.AvgCpuClock), Num(sum.MinCpuClock), Num(sum.MaxCpuClock),
+                                                   Num(sum.AvgCpuTemp), Num(sum.P95CpuTemp), Num(sum.AvgCpuPower, "0.0"), Num(sum.AvgCpuLoad))));
                 panel.Children.Add(Line(Loc.Format("BenchmarkRunEfficiency", Num(sum.FpsPerWatt(basis), "0.00"), BasisName(basis)),
                                         (Brush)FindResource("Accent")));
             }

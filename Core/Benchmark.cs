@@ -48,7 +48,8 @@ namespace Warden
         double? AvgFps, double? Low1Fps, bool Low1Approximate,
         double? AvgCpuTemp, double? P95CpuTemp, double? AvgGpuTemp, double? P95GpuTemp,
         double? AvgCpuPower, double? AvgGpuPower,
-        double? AvgCpuClock, double? AvgGpuClock, double? AvgCpuLoad, double? AvgGpuLoad)
+        double? AvgCpuClock, double? AvgGpuClock, double? AvgCpuLoad, double? AvgGpuLoad,
+        double? MinCpuClock, double? MaxCpuClock, double? MinGpuClock, double? MaxGpuClock)
     {
         public double? AvgTotalPower => AvgCpuPower is double c && AvgGpuPower is double g ? c + g : null;
 
@@ -99,7 +100,9 @@ namespace Warden
                 Avg(samples, s => s.GpuTemp), P95(samples, s => s.GpuTemp),
                 Avg(samples, s => s.CpuPower), Avg(samples, s => s.GpuPower),
                 Avg(samples, s => s.CpuClock), Avg(samples, s => s.GpuClock),
-                Avg(samples, s => s.CpuLoad), Avg(samples, s => s.GpuLoad));
+                Avg(samples, s => s.CpuLoad), Avg(samples, s => s.GpuLoad),
+                Min(samples, s => s.CpuClock), Max(samples, s => s.CpuClock),
+                Min(samples, s => s.GpuClock), Max(samples, s => s.GpuClock));
         }
 
         // Kare süreleri sırayla toplanarak geçen süre bulunur; ısınma süresi içindeki kareler atılır
@@ -125,6 +128,19 @@ namespace Warden
         {
             var v = s.Select(f).Where(x => x != null).Select(x => (double)x!.Value).ToList();
             return v.Count > 0 ? v.Average() : null;
+        }
+
+        // En düşük / en yüksek: ısınma sonrası saniyelik ölçümler arasında (ör. ısınınca düşen boost)
+        private static double? Min(List<BenchmarkSample> s, Func<BenchmarkSample, float?> f)
+        {
+            var v = s.Select(f).Where(x => x != null).Select(x => (double)x!.Value).ToList();
+            return v.Count > 0 ? v.Min() : null;
+        }
+
+        private static double? Max(List<BenchmarkSample> s, Func<BenchmarkSample, float?> f)
+        {
+            var v = s.Select(f).Where(x => x != null).Select(x => (double)x!.Value).ToList();
+            return v.Count > 0 ? v.Max() : null;
         }
 
         private static double? P95(List<BenchmarkSample> s, Func<BenchmarkSample, float?> f)

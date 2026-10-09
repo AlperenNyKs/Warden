@@ -76,7 +76,7 @@ namespace Warden
         public GpuData? PrimaryGpu { get; set; }
         /// <summary>CPU paket/Tctl sıcaklığı (°C); okunamıyorsa null (ör. PawnIO kurulu değil).</summary>
         public float? CpuTemperature { get; set; }
-        /// <summary>CPU paket gücü (W), en yüksek çekirdek saati (MHz) ve toplam yük (%); okunamıyorsa null.</summary>
+        /// <summary>CPU paket gücü (W), en hızlı çekirdeğin saati (MHz) ve toplam yük (%); okunamıyorsa null.</summary>
         public float? CpuPowerWatts { get; set; }
         public float? CpuClockMhz { get; set; }
         public float? CpuLoadPercent { get; set; }
@@ -126,6 +126,7 @@ namespace Warden
         public volatile bool FullScan = true;
 
         private GpuData? _primaryGpu;
+        private float? _cpuMaxCoreClock;   // tüm çekirdeklerin en yükseği (benchmark; tek çekirdek boşta düşük kalabilir)
         private int _intervalMs;
 
         /// <summary>
@@ -418,6 +419,7 @@ namespace Warden
                             sub.Update();
                     }
                     GpuData? primaryGpu = ReadPrimaryGpu(scanned);
+                    float? cpuMaxCoreClock = ReadMaxCoreClock(scanned);
 
                     // 2. Hızlı kısım: okunan değerleri sözlüğe işle (kısa süreli _lock)
                     lock (_lock)
@@ -425,6 +427,7 @@ namespace Warden
                         if (_disposed) return;
 
                         _primaryGpu = primaryGpu;
+                        _cpuMaxCoreClock = cpuMaxCoreClock;
 
                         foreach (var hardware in scanned)
                         {
@@ -492,6 +495,22 @@ namespace Warden
                 // Kart gücü: NVIDIA/AMD "GPU Package", Intel "GPU Power"; yoksa ilk güç sensörü
                 PowerWatts = ReadPower(gpu)
             };
+        }
+
+        /// <summary>
+        /// İşlemcinin o anki en hızlı çekirdeği (MHz): Afterburner/RTSS'teki "CPU clock" gibi. Tek bir çekirdeğe bakmak
+        /// (ör. "CPU Core #1") yanıltır; oyun o çekirdeği kullanmıyorsa 400 MHz'e kadar düşebilir. Bus hızı hariç.
+        /// </summary>
+        private static float? ReadMaxCoreClock(IEnumerable<IHardware> hardware)
+        {
+            var clocks = hardware
+                .Where(h => h.HardwareType == HardwareType.Cpu)
+                .SelectMany(h => h.Sensors)
+                .Where(s => s.SensorType == SensorType.Clock && s.Value is > 0 &&
+                            s.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
+                .Select(s => s.Value!.Value)
+                .ToList();
+            return clocks.Count > 0 ? clocks.Max() : null;
         }
 
         private static float? ReadPower(IHardware gpu)
@@ -873,7 +892,7 @@ namespace Warden
                     PrimaryGpu = _primaryGpu,
                     CpuTemperature = cpuTemp?.Value,
                     CpuPowerWatts = Cpu(SensorType.Power),
-                    CpuClockMhz = Cpu(SensorType.Clock),
+                    CpuClockMhz = _cpuMaxCoreClock ?? Cpu(SensorType.Clock),
                     CpuLoadPercent = Cpu(SensorType.Load),
                     HardwareReady = _isInitialized,
                     Favorites = favs,
