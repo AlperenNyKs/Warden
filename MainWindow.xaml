@@ -1463,7 +1463,8 @@
                                                 <StackPanel x:Name="spBenchmarkWarnings" Margin="0,4,0,0"/>
 
                                                 <!-- Sabit genişlikte sütunlar; başlıklar sürüklenerek yer değiştirir -->
-                                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,12,0,0">
+                                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,12,0,0"
+                                                              PreviewMouseWheel="HorizontalOnlyScroll_PreviewMouseWheel">
                                                     <Grid x:Name="grdBenchmarkCompare" HorizontalAlignment="Left"/>
                                                 </ScrollViewer>
 
