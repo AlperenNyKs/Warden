@@ -1408,6 +1408,18 @@
                                         </StackPanel>
                                     </Border>
 
+                                    <!-- Nasıl test yapılır? (açılır / kapanır) -->
+                                    <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}"
+                                            BorderThickness="1" CornerRadius="10" Padding="18,10" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <Button x:Name="btnBenchmarkHowTo" Style="{StaticResource FlatButton}" HorizontalAlignment="Left"
+                                                    Padding="0,4" Background="Transparent" BorderThickness="0" Click="BtnBenchmarkHowTo_Click">
+                                                <TextBlock x:Name="lblBenchmarkHowTo" Text="" FontWeight="SemiBold"/>
+                                            </Button>
+                                            <StackPanel x:Name="pnlBenchmarkHowTo" Visibility="Collapsed" Margin="0,6,0,4"/>
+                                        </StackPanel>
+                                    </Border>
+
                                     <!-- Kayıtlar -->
                                     <Grid Margin="0,14,0,10">
                                         <Grid.ColumnDefinitions>

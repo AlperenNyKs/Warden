@@ -65,6 +65,9 @@ you played and how hot things got. Everything is modular: turn off what you don'
   and load every second.
 - Summary after a warm-up: average FPS, 1% low (from real frame times), average / p95 temperatures, average MHz and
   watts, and FPS per watt (GPU, CPU or total).
+- **Laps:** one long recording is split into laps at menus / loading (GPU load drops), each lap gets a suggested
+  label from the observed GPU clock and power ("1575 MHz locked", "power limited · 143 W"), and a timeline editor
+  lets you cut it by hand. A built-in "How to test" guide covers warm-up laps, stock first and last, and alternating.
 - **Compare:** tick runs to group them by label, see the values side by side with % differences against the oldest
   group, overlay FPS / temperature / power / clock over time, and export everything to CSV.
 

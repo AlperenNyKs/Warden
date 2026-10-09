@@ -62,8 +62,12 @@ namespace Warden
         public void Rename(BenchmarkRun run, string label)
         {
             run.Label = label;
-            WriteAtomic(JsonPath(run.Id), JsonSerializer.SerializeToUtf8Bytes(run));
+            UpdateInfo(run);
         }
+
+        /// <summary>Etiket / turlar değişince yalnızca JSON yeniden yazılır (kare süreleri değişmez).</summary>
+        public void UpdateInfo(BenchmarkRun run)
+            => WriteAtomic(JsonPath(run.Id), JsonSerializer.SerializeToUtf8Bytes(run));
 
         public void Delete(string id)
         {

@@ -35,6 +35,9 @@ namespace Warden
 
         public List<BenchmarkSample> Samples { get; set; } = new();
 
+        /// <summary>Turlar (otomatik veya elle bölünmüş); null/boş ise kaydın tamamı tek birimdir.</summary>
+        public List<BenchmarkSegment>? Segments { get; set; }
+
         /// <summary>Kare süreleri (ms), sırayla. JSON'a yazılmaz; ayrı ikili dosyada saklanır.</summary>
         [System.Text.Json.Serialization.JsonIgnore]
         public float[] FrameTimesMs { get; set; } = Array.Empty<float>();
