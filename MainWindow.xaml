@@ -600,6 +600,26 @@
                                 </Button>
                             </Grid>
 
+                            <!-- Nav: Benchmark -->
+                            <Grid Margin="0,2">
+                                <Rectangle x:Name="rectBenchmarkActive" Width="3" Height="28" HorizontalAlignment="Left"
+                                           Fill="{StaticResource Accent}" RadiusX="2" RadiusY="2"
+                                           Visibility="Collapsed"/>
+                                <Button x:Name="btnNavBenchmark" Style="{StaticResource SidebarButton}" Click="BtnNavBenchmark_Click">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <Viewbox Width="20" Height="20" HorizontalAlignment="Center">
+                                            <Canvas Width="24" Height="24">
+                                                <Path Data="M4.5,18 A9,9 0 1 1 19.5,18 M12,14 L16,9" StrokeThickness="1.8" StrokeLineJoin="Round"
+                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                            </Canvas>
+                                        </Viewbox>
+                                        <TextBlock x:Name="lblNavBenchmark" Text="Benchmark" FontSize="10" Margin="0,4,0,0"
+                                                   HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
                             <!-- Nav: Status -->
                             <Grid Margin="0,2">
                                 <Rectangle x:Name="rectStatusActive" Width="3" Height="28" HorizontalAlignment="Left"
@@ -1338,6 +1358,75 @@
                         </Grid>
 
                         <!-- ════════════════════════════════════════════════ -->
+                        <!-- BENCHMARK PAGE                                    -->
+                        <!-- ════════════════════════════════════════════════ -->
+                        <Grid x:Name="pageBenchmark" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Margin="0,0,0,16">
+                                <TextBlock x:Name="lblBenchmarkHeader" Text="Benchmark"
+                                           Foreground="{StaticResource TxtPrimary}"
+                                           FontSize="24" FontWeight="Bold" FontFamily="{StaticResource DisplayFont}"/>
+                                <TextBlock x:Name="lblBenchmarkDesc" Text=""
+                                           Foreground="{StaticResource TxtSecond}" TextWrapping="Wrap"
+                                           FontSize="12" Margin="0,4,0,0"/>
+                            </StackPanel>
+
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel Margin="0,0,8,8">
+                                    <!-- Kayıt -->
+                                    <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}"
+                                            BorderThickness="1" CornerRadius="10" Padding="18,16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock x:Name="lblBenchmarkLabel" Text="" Foreground="{StaticResource TxtSecond}"
+                                                               FontSize="11" Margin="0,0,0,4"/>
+                                                    <TextBox x:Name="txtBenchmarkLabel" Margin="0,0,14,0"
+                                                             TextChanged="TxtBenchmarkLabel_TextChanged"/>
+                                                </StackPanel>
+                                                <Button x:Name="btnBenchmarkToggle" Grid.Column="1" Style="{StaticResource AccentButton}"
+                                                        Padding="22,9" VerticalAlignment="Bottom" Click="BtnBenchmarkToggle_Click">
+                                                    <TextBlock x:Name="lblBenchmarkToggle" Text=""/>
+                                                </Button>
+                                            </Grid>
+                                            <TextBlock x:Name="txtBenchmarkStatus" Text="" Foreground="{StaticResource TxtPrimary}"
+                                                       FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock x:Name="txtBenchmarkHint" Text="" Foreground="{StaticResource TxtMuted}"
+                                                       FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Kayıtlar -->
+                                    <Grid Margin="0,14,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="lblBenchmarkRunsSection" Text="KAYITLAR" Foreground="{StaticResource TxtSecond}"
+                                                   FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="lblBenchmarkEfficiency" Grid.Column="1" Text="" Foreground="{StaticResource TxtSecond}"
+                                                   FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <ComboBox x:Name="cbBenchmarkEfficiency" Grid.Column="2" Width="110"
+                                                  SelectionChanged="CbBenchmarkEfficiency_SelectionChanged"/>
+                                    </Grid>
+                                    <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}"
+                                            BorderThickness="1" CornerRadius="10" Padding="18,6">
+                                        <StackPanel x:Name="spBenchmarkRuns"/>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- ════════════════════════════════════════════════ -->
                         <!-- SYSTEM STATUS PAGE                                -->
                         <!-- ════════════════════════════════════════════════ -->
                         <Grid x:Name="pageStatus" Visibility="Collapsed">
@@ -1713,6 +1802,69 @@
                                                                 Padding="12,6" VerticalAlignment="Center" Click="BtnGoDevices_Click">
                                                             <TextBlock x:Name="lblGoDevices" Text=""/>
                                                         </Button>
+                                                    </Grid>
+                                                </Border>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                                            CornerRadius="10" Padding="18,16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource AccentDim}"
+                                                        VerticalAlignment="Top" Margin="0,0,14,0">
+                                                    <Viewbox Width="18" Height="18">
+                                                        <Canvas Width="24" Height="24">
+                                                            <Path Data="M4.5,18 A9,9 0 1 1 19.5,18 M12,14 L16,9" StrokeThickness="1.8" StrokeLineJoin="Round"
+                                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stroke="{StaticResource Accent}"/>
+                                                        </Canvas>
+                                                    </Viewbox>
+                                                </Border>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock x:Name="lblModuleBenchmark" Text=""
+                                                               Foreground="{StaticResource TxtPrimary}" FontSize="14" FontWeight="SemiBold"/>
+                                                    <TextBlock x:Name="lblModuleBenchmarkDesc" Text=""
+                                                               Foreground="{StaticResource TxtSecond}" FontSize="11.5" TextWrapping="Wrap"
+                                                               LineHeight="17" Margin="0,4,16,0"/>
+                                                </StackPanel>
+                                                <CheckBox x:Name="chkModuleBenchmark" Grid.Column="2" VerticalAlignment="Top" Margin="0,6,0,0"
+                                                          Checked="Setting_Changed" Unchecked="Setting_Changed"/>
+                                            </Grid>
+                                            <!-- Modül kapalıyken alt ayarlar gizlenir -->
+                                            <StackPanel Margin="48,16,0,0"
+                                                        Visibility="{Binding IsChecked, ElementName=chkModuleBenchmark, Converter={StaticResource BoolToVis}}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock x:Name="lblBenchmarkHotkey" Text="" Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                        <TextBlock x:Name="lblBenchmarkHotkeyDesc" Text="" Foreground="{StaticResource TxtSecond}"
+                                                                   FontSize="11" TextWrapping="Wrap" Margin="0,2,16,0"/>
+                                                    </StackPanel>
+                                                    <ComboBox x:Name="cbBenchmarkHotkey" Grid.Column="1" Width="160"
+                                                              SelectionChanged="Setting_Changed"/>
+                                                </Grid>
+                                                <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,12,0,0">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel VerticalAlignment="Center">
+                                                            <TextBlock x:Name="lblBenchmarkWarmup" Text="" Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold"/>
+                                                            <TextBlock x:Name="lblBenchmarkWarmupDesc" Text="" Foreground="{StaticResource TxtSecond}"
+                                                                       FontSize="11" TextWrapping="Wrap" Margin="0,2,16,0"/>
+                                                        </StackPanel>
+                                                        <ComboBox x:Name="cbBenchmarkWarmup" Grid.Column="1" Width="160"
+                                                                  SelectionChanged="Setting_Changed"/>
                                                     </Grid>
                                                 </Border>
                                             </StackPanel>
