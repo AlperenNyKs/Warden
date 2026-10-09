@@ -1394,7 +1394,11 @@
                                                 </StackPanel>
                                                 <Button x:Name="btnBenchmarkToggle" Grid.Column="1" Style="{StaticResource AccentButton}"
                                                         Padding="22,9" VerticalAlignment="Bottom" Click="BtnBenchmarkToggle_Click">
-                                                    <TextBlock x:Name="lblBenchmarkToggle" Text=""/>
+                                                    <StackPanel>
+                                                        <TextBlock x:Name="lblBenchmarkToggle" Text="" HorizontalAlignment="Center"/>
+                                                        <TextBlock x:Name="lblBenchmarkToggleHotkey" Text="" FontSize="10" Opacity="0.75"
+                                                                   HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                                    </StackPanel>
                                                 </Button>
                                             </Grid>
                                             <TextBlock x:Name="txtBenchmarkStatus" Text="" Foreground="{StaticResource TxtPrimary}"
