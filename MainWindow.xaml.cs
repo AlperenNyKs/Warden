@@ -904,6 +904,21 @@ namespace Warden
         }
 
         /// <summary>
+        /// Yalnızca yatay kaydıran tablo ScrollViewer'ı tekerleği yutmasın; olay sayfanın dikey kaydırıcısına gitsin.
+        /// </summary>
+        private void HorizontalOnlyScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (e.Handled || sender is not UIElement element) return;
+            e.Handled = true;
+            if (VisualTreeHelper.GetParent(element) is UIElement parent)
+                parent.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+                {
+                    RoutedEvent = UIElement.MouseWheelEvent,
+                    Source = element
+                });
+        }
+
+        /// <summary>
         /// Tek bir çizgi grafiği: silik ızgara, 2 px çizgiler, çizgi sonunda etiket, fareyle dikey çizgi + değerler.
         /// </summary>
         private sealed class ChartView
