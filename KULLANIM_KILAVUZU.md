@@ -28,7 +28,7 @@
 
 ### Geliştirici: kaynaktan çalıştırma
 ```powershell
-cd D:\ClaudeProjeler\Warden
+cd D:\Warden
 dotnet run -c Release
 ```
 
