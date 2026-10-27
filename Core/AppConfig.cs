@@ -17,6 +17,9 @@ namespace Warden
         public bool ModuleGpuProfile { get; set; } = true;   // Afterburner profil geçişi (ModuleHardware gerekir)
         public bool ModuleBenchmark { get; set; } = false;   // kayıt/karşılaştırma; global kısayol tuşu aldığı için varsayılan kapalı
 
+        // Sol menüde gizlenen sekmeler (sayfa anahtarı: overview, profiles, devices, ...). Ayarlar her zaman görünür.
+        public List<string> HiddenNavPages { get; set; } = new();
+
         // Benchmark: Ctrl+Shift+<tuş> (F9–F12), baştan atılan ısınma süresi ve "watt başına FPS" tabanı
         public string BenchmarkHotkey { get; set; } = "F10";
         public int BenchmarkWarmupSeconds { get; set; } = 10;
@@ -115,6 +118,7 @@ namespace Warden
 
             DisabledDevices ??= new();
             DisabledDeviceNames ??= new();
+            HiddenNavPages ??= new();
             TelemetryFavorites ??= new();
             TelemetryGraphSensors ??= new();
 

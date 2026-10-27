@@ -1538,6 +1538,7 @@
                         <Grid x:Name="pageSettings" Visibility="Collapsed">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
 
@@ -1559,54 +1560,23 @@
                                            Foreground="{StaticResource TxtMuted}" FontSize="11" VerticalAlignment="Bottom"/>
                             </Grid>
 
-                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                                <StackPanel Margin="0,0,8,8">
-                                    <TextBlock x:Name="lblGeneralSection" Text="GENEL"
-                                               Foreground="{StaticResource TxtSecond}"
-                                               FontSize="11" FontWeight="Bold" Margin="0,0,0,10"/>
-
-                                    <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}" BorderThickness="1"
-                                            CornerRadius="10" Padding="18,16" Margin="0,0,0,12">
-                                        <StackPanel>
-                                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0" Padding="0" Margin="0">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel VerticalAlignment="Center">
-                                                        <TextBlock x:Name="lblStartWithWin" Text=""
-                                                                   Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                                            <TextBlock x:Name="lblStartWithWinDesc" Text=""
-                                                                       Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap" Margin="0,2,16,0"/>
-                                                    </StackPanel>
-                                                    <CheckBox x:Name="chkStartup" Grid.Column="1" VerticalAlignment="Center"
-                                                              Checked="Setting_Changed" Unchecked="Setting_Changed"/>
-                                                </Grid>
-                                            </Border>
-                                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,12,0,0">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel VerticalAlignment="Center">
-                                                        <TextBlock x:Name="lblLanguage" Text=""
-                                                                   Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                                    </StackPanel>
-                                                    <ComboBox x:Name="cbLanguage" Grid.Column="1" Width="160"
-                                                              SelectionChanged="CbLanguage_SelectionChanged">
-                                                        <ComboBoxItem Content="Türkçe" Tag="TR"/>
-                                                        <ComboBoxItem Content="English" Tag="EN"/>
-                                                    </ComboBox>
-                                                </Grid>
-                                            </Border>
-                                        </StackPanel>
-                                    </Border>
-
+                            <!-- Ayarlar iki sekmede: Özellikler (modüller + menü) ve Genel -->
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,14">
+                                <Button x:Name="btnSettingsTabFeatures" Style="{StaticResource FlatButton}" Padding="16,7"
+                                        Margin="0,0,8,0" Click="BtnSettingsTab_Click">
+                                    <TextBlock x:Name="lblSettingsTabFeatures" Text="Özellikler"/>
+                                </Button>
+                                <Button x:Name="btnSettingsTabGeneral" Style="{StaticResource FlatButton}" Padding="16,7"
+                                        Click="BtnSettingsTab_Click">
+                                    <TextBlock x:Name="lblSettingsTabGeneral" Text="Genel"/>
+                                </Button>
+                            </StackPanel>
+                            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <Grid Margin="0,0,8,8">
+                                <StackPanel x:Name="pnlSettingsFeatures">
                                     <TextBlock x:Name="lblModulesSection" Text="MODÜLLER"
                                                Foreground="{StaticResource TxtSecond}"
-                                               FontSize="11" FontWeight="Bold" Margin="0,14,0,10"/>
+                                               FontSize="11" FontWeight="Bold" Margin="0,0,0,10"/>
 
                                     <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}" BorderThickness="1"
                                             CornerRadius="10" Padding="18,16" Margin="0,0,0,12">
@@ -1944,6 +1914,63 @@
                                         </StackPanel>
                                     </Border>
 
+                                    <TextBlock x:Name="lblNavMenuSection" Text="MENÜ"
+                                               Foreground="{StaticResource TxtSecond}"
+                                               FontSize="11" FontWeight="Bold" Margin="0,14,0,4"/>
+                                    <TextBlock x:Name="lblNavMenuDesc" Text=""
+                                               Foreground="{StaticResource TxtMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                    <!-- Satırlar koddan doldurulur: her menü sekmesi için bir aç/kapa -->
+                                    <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                                            CornerRadius="10" Padding="18,16" Margin="0,0,0,12">
+                                        <StackPanel x:Name="pnlNavToggles"/>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel x:Name="pnlSettingsGeneral" Visibility="Collapsed">
+                                    <TextBlock x:Name="lblGeneralSection" Text="GENEL"
+                                               Foreground="{StaticResource TxtSecond}"
+                                               FontSize="11" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                                    <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                                            CornerRadius="10" Padding="18,16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0" Padding="0" Margin="0">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock x:Name="lblStartWithWin" Text=""
+                                                                   Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                            <TextBlock x:Name="lblStartWithWinDesc" Text=""
+                                                                       Foreground="{StaticResource TxtSecond}" FontSize="11" TextWrapping="Wrap" Margin="0,2,16,0"/>
+                                                    </StackPanel>
+                                                    <CheckBox x:Name="chkStartup" Grid.Column="1" VerticalAlignment="Center"
+                                                              Checked="Setting_Changed" Unchecked="Setting_Changed"/>
+                                                </Grid>
+                                            </Border>
+                                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,12,0,0">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock x:Name="lblLanguage" Text=""
+                                                                   Foreground="{StaticResource TxtPrimary}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    </StackPanel>
+                                                    <ComboBox x:Name="cbLanguage" Grid.Column="1" Width="160"
+                                                              SelectionChanged="CbLanguage_SelectionChanged">
+                                                        <ComboBoxItem Content="Türkçe" Tag="TR"/>
+                                                        <ComboBoxItem Content="English" Tag="EN"/>
+                                                    </ComboBox>
+                                                </Grid>
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+
                                     <TextBlock x:Name="lblUpdatesSection" Text="GÜNCELLEMELER"
                                                Foreground="{StaticResource TxtSecond}"
                                                FontSize="11" FontWeight="Bold" Margin="0,14,0,10"/>
@@ -1996,6 +2023,7 @@
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
+                                </Grid>
                             </ScrollViewer>
                         </Grid>
 
