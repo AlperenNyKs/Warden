@@ -91,7 +91,8 @@ namespace Warden
 
             LoadInitialConfig();
             _ = LoadSonarPresetsAsync();
-            ShowPage("overview");
+            ShowSettingsTab("features");
+            ShowPage(NavItems.FirstOrDefault(n => !_context.Config.HiddenNavPages.Contains(n.Key)).Key ?? "settings");
 
             // Status LED pulse animasyonunu başlat (kontrol edilebilir: pencere gizliyken duraklatılır)
             Loaded += (s, e) =>
@@ -314,6 +315,94 @@ namespace Warden
             SetSonarIndicator(Color.FromRgb(120, 120, 160));
             _sonarConnected = false;
             _presetsLoaded = false;
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Settings tabs & menu visibility
+        // ══════════════════════════════════════════════════════════════
+
+        private void BtnSettingsTab_Click(object sender, RoutedEventArgs e)
+            => ShowSettingsTab(sender == btnSettingsTabGeneral ? "general" : "features");
+
+        private void ShowSettingsTab(string tab)
+        {
+            bool features = tab == "features";
+            pnlSettingsFeatures.Visibility = features ? Visibility.Visible : Visibility.Collapsed;
+            pnlSettingsGeneral.Visibility = features ? Visibility.Collapsed : Visibility.Visible;
+            foreach (var (btn, active) in new[] { (btnSettingsTabFeatures, features), (btnSettingsTabGeneral, !features) })
+            {
+                btn.Foreground = (Brush)FindResource(active ? "Accent" : "TxtSecond");
+                btn.BorderBrush = (Brush)FindResource(active ? "BorderGlow" : "Border");
+                btn.Background = (Brush)FindResource(active ? "NavActiveBg" : "BgWidget");
+            }
+        }
+
+        // Menüden gizlenebilen sekmeler (Ayarlar hariç: gizlenirse geri dönülemez)
+        private (string Key, Button Nav, TextBlock Label)[] NavItems => new[]
+        {
+            ("overview",  btnNavOverview,  lblNavOverview),
+            ("profiles",  btnNavHome,      lblNavHome),
+            ("devices",   btnNavDevice,    lblNavDevice),
+            ("gpu",       btnNavGpu,       lblNavGpu),
+            ("telemetry", btnNavTelemetry, lblNavTelemetry),
+            ("history",   btnNavHistory,   lblNavHistory),
+            ("benchmark", btnNavBenchmark, lblNavBenchmark),
+            ("status",    btnNavStatus,    lblNavStatus),
+        };
+
+        private void ApplyNavVisibility()
+        {
+            foreach (var (key, nav, _) in NavItems)
+                ((FrameworkElement)nav.Parent).Visibility =
+                    _context.Config.HiddenNavPages.Contains(key) ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        /// <summary>Özellikler sekmesindeki "Menü" kartı: her sol menü sekmesi için bir aç/kapa satırı.</summary>
+        private void RenderNavToggles()
+        {
+            pnlNavToggles.Children.Clear();
+            bool first = true;
+            foreach (var (key, _, label) in NavItems)
+            {
+                var grid = new Grid();
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                grid.Children.Add(new TextBlock
+                {
+                    Text = label.Text,
+                    Foreground = (Brush)FindResource("TxtPrimary"),
+                    FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                var chk = new System.Windows.Controls.CheckBox
+                {
+                    IsChecked = !_context.Config.HiddenNavPages.Contains(key),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(chk, 1);
+                chk.Checked += (s, e) => SetNavHidden(key, false);
+                chk.Unchecked += (s, e) => SetNavHidden(key, true);
+                grid.Children.Add(chk);
+
+                pnlNavToggles.Children.Add(new Border
+                {
+                    BorderBrush = (Brush)FindResource("Border"),
+                    BorderThickness = first ? new Thickness(0) : new Thickness(0, 1, 0, 0),
+                    Padding = first ? new Thickness(0) : new Thickness(0, 12, 0, 0),
+                    Margin = first ? new Thickness(0) : new Thickness(0, 12, 0, 0),
+                    Child = grid
+                });
+                first = false;
+            }
+        }
+
+        private void SetNavHidden(string key, bool hidden)
+        {
+            var list = _context.Config.HiddenNavPages;
+            list.RemoveAll(k => k == key);
+            if (hidden) list.Add(key);
+            _context.SaveConfig();
+            ApplyNavVisibility();
         }
 
         /// <summary>Oyun taraması bildirimine tıklanınca tepsi çağırır.</summary>
@@ -1347,6 +1436,7 @@ namespace Warden
                 nav.Background = active ? (Brush)FindResource("NavActiveBg") : Brushes.Transparent;
             }
             ApplyModuleState();
+            ApplyNavVisibility();
 
             if (page == "overview")
             {
@@ -2781,6 +2871,10 @@ namespace Warden
             lblSettingsHeader.Text      = Loc.Get("SettingsHeader");
             lblSettingsDesc.Text        = Loc.Get("SettingsDesc");
             lblGeneralSection.Text      = Loc.Get("GeneralSection");
+            lblSettingsTabFeatures.Text = Loc.Get("SettingsTabFeatures");
+            lblSettingsTabGeneral.Text  = Loc.Get("SettingsTabGeneral");
+            lblNavMenuSection.Text      = Loc.Get("NavMenuSection");
+            lblNavMenuDesc.Text         = Loc.Get("NavMenuDesc");
             lblStartWithWin.Text        = Loc.Get("StartWithWin");
             lblStartWithWinDesc.Text    = Loc.Get("StartWithWinDesc");
             lblLanguage.Text            = Loc.Get("Language");
@@ -2838,6 +2932,7 @@ namespace Warden
                 item.Content = Loc.Format("ProfileN", item.Tag);
             foreach (ComboBoxItem item in cbCooldown.Items)
                 item.Content = Loc.Format("SecondsN", item.Tag);
+            RenderNavToggles();   // satır adları menü etiketlerinden gelir
         }
 
         // ══════════════════════════════════════════════════════════════
